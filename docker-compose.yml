@@ -1,0 +1,76 @@
+services:
+
+  postgres:
+    image: postgres:latest
+    container_name: ddocdesk-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ddocdesk}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ddocdesk_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-ddocdesk}
+    ports:
+      - "5432:5432"
+    volumes:
+      # For PG 18+, or future-proofing, the mount is now at the root directory
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ddocdesk}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: ddocdesk-minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"   # API
+      - "9001:9001"   # Web Console
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ddocdesk-qdrant
+    ports:
+      - "6333:6333"   # HTTP API
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: ddocdesk-keycloak
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_pass}
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: ${POSTGRES_DB:-ddocdesk}
+      KC_DB_USERNAME: ${POSTGRES_USER:-ddocdesk}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-ddocdesk_pass}
+    command: start-dev --import-realm
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./infrastructure/keycloak:/opt/keycloak/data/import
+
+volumes:
+  postgres_data:
+  minio_data:
+  qdrant_data:
