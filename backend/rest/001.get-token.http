@@ -1,0 +1,6 @@
+curl -X POST http://localhost:8080/realms/ddocdesk/protocol/openid-connect/token \
+  -d "client_id=ddocdesk-web" \
+  -d "grant_type=password" \
+  -d "username=admin" \
+  -d "password=admin"
+  
