@@ -1,0 +1,78 @@
+{
+  "realm": "ddocdesk",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "roles": {
+    "realm": [
+      {
+        "name": "workspace-admin",
+        "description": "Can manage workspace settings and members"
+      },
+      {
+        "name": "workspace-member",
+        "description": "Can upload and search documents"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "ddocdesk-web",
+      "name": "dDocDesk Web App",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:3000"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "+"
+      ],
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true
+    }
+  ],
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@ddocdesk.local",
+      "firstName": "Admin",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "workspace-admin",
+        "default-roles-ddocdesk"
+      ]
+    },
+    {
+      "username": "user",
+      "enabled": true,
+      "email": "user@ddocdesk.local",
+      "firstName": "Regular",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "user",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "workspace-member",
+        "default-roles-ddocdesk"
+      ]
+    }
+  ]
+}
