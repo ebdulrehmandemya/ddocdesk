@@ -1,66 +1,115 @@
-// frontend/app/page.tsx
+import { getSession } from "@/lib/auth";
 
-interface HealthCheck {
-  status: string;
-  checks: {
-    postgres: string;
-    minio: string;
-    qdrant: string;
-  };
-}
+export const dynamic = "force-dynamic";
 
-async function getHealth(): Promise<HealthCheck | null> {
+type ApiResult = {
+  ok: boolean;
+  status: number;
+  data: unknown;
+};
+
+async function callBackendApi(accessToken: string): Promise<ApiResult> {
   try {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/health/readyz`, { 
-      cache: 'no-store' // Ensure we always get fresh status
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/users/me`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+      cache: "no-store",
     });
-    if (!res.ok) return null;
-    return res.json();
-  } catch (error) {
-    console.error("Failed to fetch health status:", error);
-    return null;
+
+    const data = response.ok ? await response.json() : null;
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      data,
+    };
+  } catch {
+    return {
+      ok: false,
+      status: 0,
+      data: "Backend API unreachable",
+    };
   }
 }
 
 export default async function Home() {
-  const health = await getHealth();
+  const session = await getSession();
+
+  if (!session) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center p-8 bg-slate-50">
+        <div className="w-full max-w-xl bg-white shadow-xl rounded-2xl p-8 border border-slate-200 text-center">
+          <h1 className="text-3xl font-bold text-slate-900">dDocDesk MVP</h1>
+          <p className="text-slate-500 mt-2 mb-8">
+            Phase 2 — Identity and Workspaces
+          </p>
+
+          <a
+            href="/api/auth/login"
+            className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-3 text-white font-semibold hover:bg-blue-700 transition-colors"
+          >
+            Sign in with Keycloak
+          </a>
+        </div>
+      </main>
+    );
+  }
+
+  const apiResult = await callBackendApi(session.accessToken);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center p-8 bg-slate-50">
-      <div className="w-full max-w-2xl bg-white shadow-xl rounded-2xl p-8 border border-slate-200">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 tracking-tight">dDocDesk MVP</h1>
-          <p className="text-slate-500 mt-1">Phase 1: Local Foundation</p>
-        </div>
-
-        <div className="space-y-6">
-          {/* API Connection Status */}
-          <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl border border-slate-100">
-            <span className="font-semibold text-slate-700">Backend API</span>
-            <span className={`px-3 py-1 rounded-full text-sm font-medium ${health ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-              {health ? '● Connected' : '○ Offline'}
-            </span>
+      <div className="w-full max-w-3xl bg-white shadow-xl rounded-2xl p-8 border border-slate-200">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">dDocDesk MVP</h1>
+            <p className="text-slate-500 mt-1">
+              Signed in as {session.user.name ?? session.user.email ?? session.user.id}
+            </p>
           </div>
 
-          {/* Infrastructure Checks */}
-          {health && (
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {Object.entries(health.checks).map(([service, status]) => (
-                <div key={service} className="p-4 border border-slate-200 rounded-xl bg-white hover:shadow-md transition-shadow">
-                  <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{service}</div>
-                  <div className={`text-lg font-bold ${status === 'ok' ? 'text-green-600' : 'text-red-600'}`}>
-                    {status === 'ok' ? '✓ Healthy' : '✗ Error'}
-                  </div>
-                </div>
-              ))}
+          <a
+            href="/api/auth/logout"
+            className="rounded-xl border border-slate-300 px-4 py-2 text-slate-700 font-medium hover:bg-slate-100 transition-colors"
+          >
+            Sign out
+          </a>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+          <div className="p-4 border border-slate-200 rounded-xl">
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+              Keycloak Session
             </div>
-          )}
-          
-          {!health && (
-            <div className="p-4 border border-red-200 bg-red-50 rounded-xl text-red-700 text-sm">
-              Could not connect to the FastAPI backend. Ensure it is running on <code>http://localhost:8000</code>.
+            <div className="text-lg font-bold text-green-600">✓ Active</div>
+            <div className="text-sm text-slate-500 mt-1">{session.user.email}</div>
+          </div>
+
+          <div className="p-4 border border-slate-200 rounded-xl">
+            <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+              FastAPI Authorization
             </div>
-          )}
+            <div
+              className={`text-lg font-bold ${
+                apiResult.ok ? "text-green-600" : "text-red-600"
+              }`}
+            >
+              {apiResult.ok ? "✓ Authorized" : "✗ Failed"}
+            </div>
+            <div className="text-sm text-slate-500 mt-1">
+              HTTP {apiResult.status || "network error"}
+            </div>
+          </div>
+        </div>
+
+        <div className="border border-slate-200 rounded-xl p-4 bg-slate-50 overflow-auto">
+          <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+            Backend /users/me response
+          </div>
+          <pre className="text-sm text-slate-800 whitespace-pre-wrap">
+            {JSON.stringify(apiResult.data, null, 2)}
+          </pre>
         </div>
       </div>
     </main>
