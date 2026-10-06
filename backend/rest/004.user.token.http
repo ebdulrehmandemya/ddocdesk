@@ -1,0 +1,6 @@
+USER_TOKEN=$(curl -s -X POST http://localhost:8080/realms/ddocdesk/protocol/openid-connect/token \
+  -d "client_id=ddocdesk-web" \
+  -d "grant_type=password" \
+  -d "username=user" \
+  -d "password=user" \
+  | python3 -c "import sys, json; print(json.load(sys.stdin)['access_token'])")

@@ -1,0 +1,7 @@
+WORKSPACE_ID=$(curl -s -X POST http://localhost:8000/api/v1/workspaces \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Acme Workspace"}' \
+  | python3 -c "import sys, json; print(json.load(sys.stdin)['id'])")
+
+echo $WORKSPACE_ID

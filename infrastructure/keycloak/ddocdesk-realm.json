@@ -41,7 +41,7 @@
     {
       "username": "admin",
       "enabled": true,
-      "email": "admin@ddocdesk.local",
+      "email": "admin@ddocdesk.io",
       "firstName": "Admin",
       "lastName": "User",
       "credentials": [
@@ -59,7 +59,7 @@
     {
       "username": "user",
       "enabled": true,
-      "email": "user@ddocdesk.local",
+      "email": "user@ddocdesk.io",
       "firstName": "Regular",
       "lastName": "User",
       "credentials": [

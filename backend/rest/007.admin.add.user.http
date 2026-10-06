@@ -1,0 +1,7 @@
+curl -X POST http://localhost:8000/api/v1/workspaces/$WORKSPACE_ID/members \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@ddocdesk.local",
+    "role": "member"
+  }'
