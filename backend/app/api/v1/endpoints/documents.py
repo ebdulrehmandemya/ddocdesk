@@ -12,6 +12,8 @@ from app.models.document import Document, DocumentStatus
 from app.schemas.document import DocumentRead
 from app.services.minio_client import s3_client
 from app.services.document_processor import extract_text
+from app.services.document_processor import index_document
+
 
 router = APIRouter()
 BUCKET_NAME = "ddocdesk-docs"
@@ -35,7 +37,9 @@ async def process_document_task(document_id: uuid.UUID):
             
             # Run blocking PyPDF/Docx call in thread
             text = await asyncio.to_thread(extract_text, file_bytes, document.mime_type)
-            
+
+            await index_document(document.id, document.workspace_id, text)
+
             document.extracted_text = text
             document.status = DocumentStatus.READY
             await db.commit()

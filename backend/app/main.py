@@ -8,6 +8,7 @@ from app.core.config import settings
 from app.db.session import engine
 from app.models import Base
 from app.services.minio_client import s3_client
+from app.services.qdrant_client import ensure_collection_exists
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -22,6 +23,9 @@ async def lifespan(app: FastAPI):
     except ClientError:
         s3_client.create_bucket(Bucket=bucket_name)
         
+    # 3. Ensure Qdrant collection exists
+    ensure_collection_exists()
+    
     yield
 
 app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
