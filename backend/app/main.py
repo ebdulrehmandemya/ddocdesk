@@ -9,6 +9,8 @@ from app.db.session import engine
 from app.models import Base
 from app.services.minio_client import s3_client
 from app.services.qdrant_client import ensure_collection_exists
+from fastapi.middleware.cors import CORSMiddleware
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,4 +31,11 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title=settings.PROJECT_NAME, lifespan=lifespan)
+app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"], # Restrict to Next.js frontend
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 app.include_router(api_router, prefix=settings.API_V1_STR)

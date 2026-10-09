@@ -18,6 +18,9 @@ from app.services.document_processor import index_document
 router = APIRouter()
 BUCKET_NAME = "ddocdesk-docs"
 
+
+ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
+
 async def process_document_task(document_id: uuid.UUID):
     """Background task to download from MinIO, extract text, and update DB."""
     async with SessionLocal() as db:
@@ -67,7 +70,11 @@ async def upload_document(
     
     if not file.filename or not file.content_type:
          raise HTTPException(status_code=400, detail="Invalid file metadata")
-         
+    
+    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"File type {ext} not allowed. Allowed: {ALLOWED_EXTENSIONS}")
+
     contents = await file.read()
     size_bytes = len(contents)
     
