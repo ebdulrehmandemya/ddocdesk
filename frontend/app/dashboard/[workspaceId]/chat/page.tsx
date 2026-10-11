@@ -6,11 +6,22 @@ interface Message {
   id: string; 
   role: string; 
   content: string; 
-  citations?: { document_id: string; chunk_index: number; text: string; file_name: string }[]; 
+  conversation_id?: string; 
+  citations?: { 
+    document_id: string; 
+    chunk_index: number; 
+    text: string; 
+    file_name: string; 
+  }[]; 
 }
 
-export default function ChatPage({ params }: { params: any }) {
-  const { workspaceId } = typeof params.then === 'function' ? use(params) : params;
+interface PageProps {
+  params: { workspaceId: string } | Promise<{ workspaceId: string }>;
+}
+
+
+export default function ChatPage({ params }: PageProps) {
+  const { workspaceId } = "then" in params ? use(params) : params;
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -21,7 +32,7 @@ export default function ChatPage({ params }: { params: any }) {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = async (e: React.FormEvent) => {
+  const handleSend = async (e: React.ChangeEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
     
@@ -37,7 +48,7 @@ export default function ChatPage({ params }: { params: any }) {
         body: JSON.stringify({ query: input, conversation_id: convId }),
       });
       setMessages(prev => [...prev, data]);
-      setConvId(data.conversation_id);
+      setConvId(data.conversation_id ?? null);
     } catch (e) { 
       console.error(e);
       setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "assistant", content: "Error communicating with AI." }]);

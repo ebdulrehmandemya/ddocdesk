@@ -1,25 +1,46 @@
 "use client";
 import { useState, useEffect, useRef, use } from "react";
 import { apiFetch } from "@/lib/api";
-import { getSession } from "@/lib/auth";
 
-interface Doc { id: string; file_name: string; status: string; created_at: string; }
+interface Doc { 
+  id: string; 
+  file_name: string; 
+  status: string; 
+  created_at: string; 
+}
 
-export default function DocumentsPage({ params }: { params: any }) {
-  const { workspaceId } = typeof params.then === 'function' ? use(params) : params;
+interface PageProps {
+  params: { workspaceId: string } | Promise<{ workspaceId: string }>;
+}
+
+export default function DocumentsPage({ params }: PageProps) {
+  const { workspaceId } = "then" in params ? use(params) : params;
+  
   const [docs, setDocs] = useState<Doc[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const fetchDocs = async () => {
-    const data = await apiFetch<Doc[]>(`/workspaces/${workspaceId}/documents`);
-    setDocs(data);
-  };
+  useEffect(() => {
+    let isMounted = true;
+    
+    const fetchDocs = async () => {
+      try {
+        const data = await apiFetch<Doc[]>(`/workspaces/${workspaceId}/documents`);
+        if (isMounted) {
+          setDocs(data);
+        }
+      } catch (e) {
+        console.error("Failed to fetch documents:", e);
+      }
+    };
 
-  useEffect(() => { 
-    fetchDocs(); 
-    const i = setInterval(fetchDocs, 3000); // Poll for status updates
-    return () => clearInterval(i); 
+    fetchDocs();
+    const interval = setInterval(fetchDocs, 3000);
+    
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [workspaceId]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -30,26 +51,28 @@ export default function DocumentsPage({ params }: { params: any }) {
     const formData = new FormData();
     formData.append("file", file);
 
-    // Use apiFetch which routes through the proxy and attaches the token automatically!
     try {
       await apiFetch(`/workspaces/${workspaceId}/documents`, {
         method: "POST",
         body: formData,
       });
+      
+      // Immediate refresh after upload
+      const data = await apiFetch<Doc[]>(`/workspaces/${workspaceId}/documents`);
+      setDocs(data);
     } catch (err) {
       console.error("Upload failed", err);
     }
     
     setUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
-    fetchDocs();
   };
-  
+
   const statusColors: Record<string, string> = {
-    ready: "bg-green-100 text-green-800",
-    processing: "bg-blue-100 text-blue-800 animate-pulse",
-    pending: "bg-slate-100 text-slate-800",
-    failed: "bg-red-100 text-red-800"
+    ready: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400",
+    processing: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 animate-pulse",
+    pending: "bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300",
+    failed: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400"
   };
 
   return (
@@ -76,7 +99,7 @@ export default function DocumentsPage({ params }: { params: any }) {
               <tr key={d.id} className="border-b border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition">
                 <td className="p-4 font-medium text-slate-900 dark:text-white">{d.file_name}</td>
                 <td className="p-4">
-                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${statusColors[d.status] || "bg-slate-100"}`}>
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${statusColors[d.status] || "bg-slate-100 dark:bg-slate-800"}`}>
                     {d.status}
                   </span>
                 </td>
@@ -84,7 +107,11 @@ export default function DocumentsPage({ params }: { params: any }) {
               </tr>
             ))}
             {docs.length === 0 && (
-              <tr><td colSpan={3} className="p-12 text-center text-slate-500 dark:text-slate-400">No documents yet. Upload one to get started.</td></tr>
+              <tr>
+                <td colSpan={3} className="p-12 text-center text-slate-500 dark:text-slate-400">
+                  No documents yet. Upload one to get started.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>

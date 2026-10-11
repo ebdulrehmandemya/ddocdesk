@@ -4,8 +4,12 @@ import { apiFetch } from "@/lib/api";
 
 interface SearchResult { document_id: string; chunk_text: string; score: number; }
 
-export default function SearchPage({ params }: { params: any }) {
-  const { workspaceId } = typeof params.then === 'function' ? use(params) : params;
+interface PageProps {
+  params: { workspaceId: string } | Promise<{ workspaceId: string }>;
+}
+
+export default function SearchPage({ params }: PageProps ) {
+  const { workspaceId } = "then" in params ? use(params) : params;
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);

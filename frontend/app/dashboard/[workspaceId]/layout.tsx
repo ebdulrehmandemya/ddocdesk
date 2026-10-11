@@ -3,13 +3,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { use } from "react";
 
-export default function WorkspaceLayout({ 
-  children, 
-  params 
-}: { 
-  children: React.ReactNode, 
-  params: any 
-}) {
+
+interface LayoutProps {
+  children: React.ReactNode;
+  params: { workspaceId: string } | Promise<{ workspaceId: string }>;
+}
+
+export default function WorkspaceLayout({ children, params }:  LayoutProps) {
   const { workspaceId } = "then" in params ? use(params) : params;
   const pathname = usePathname();
   
