@@ -1,6 +1,7 @@
 import uuid
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
+import io
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +14,10 @@ from app.schemas.document import DocumentRead
 from app.services.minio_client import s3_client
 from app.services.document_processor import extract_text
 from app.services.document_processor import index_document
+from app.services.qdrant_client import qdrant_client, COLLECTION_NAME
+from fastapi.responses import StreamingResponse
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+from sqlalchemy import select, delete as sql_delete 
 
 
 router = APIRouter()
@@ -117,3 +122,76 @@ async def list_documents(
     statement = select(Document).where(Document.workspace_id == workspace.id).order_by(Document.created_at.desc())
     result = await db.execute(statement)
     return result.scalars().all()
+
+
+@router.get("/{workspace_id}/documents/{document_id}/download")
+async def download_document(
+    workspace_id: uuid.UUID,
+    document_id: uuid.UUID,
+    workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
+    db: AsyncSession = Depends(get_db),
+):
+    workspace, _ = workspace_membership
+    
+    stmt = select(Document).where(Document.id == document_id, Document.workspace_id == workspace.id)
+    result = await db.execute(stmt)
+    doc = result.scalar_one_or_none()
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    # Fetch file from MinIO in a background thread
+    def get_file():
+        response = s3_client.get_object(Bucket=BUCKET_NAME, Key=doc.minio_key)
+        return response['Body'].read()
+        
+    file_bytes = await asyncio.to_thread(get_file)
+    
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=doc.mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{doc.file_name}"'}
+    )
+
+@router.delete("/{workspace_id}/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(
+    workspace_id: uuid.UUID,
+    document_id: uuid.UUID,
+    workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    workspace, membership = workspace_membership
+    
+    stmt = select(Document).where(Document.id == document_id, Document.workspace_id == workspace.id)
+    result = await db.execute(stmt)
+    doc = result.scalar_one_or_none()
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    # Authorization: Owners/Admins can delete anything. Members can only delete their own uploads.
+    if membership.role not in {"owner", "admin"} and doc.uploaded_by_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this document")
+
+    # 1. Delete from Qdrant (Vectors)
+    def delete_vectors():
+        qdrant_client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=Filter(
+                must=[FieldCondition(key="document_id", match=MatchValue(value=str(document_id)))]
+            )
+        )
+    await asyncio.to_thread(delete_vectors)
+
+    # 2. Delete from MinIO (File)
+    def delete_file():
+        s3_client.delete_object(Bucket=BUCKET_NAME, Key=doc.minio_key)
+    await asyncio.to_thread(delete_file)
+
+    # 3. Delete from PostgreSQL (Metadata & Citations)
+    # Note: If you have foreign keys from Messages to Documents, you'd delete them here too.
+    await db.delete(doc)
+    await db.commit()
+    
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

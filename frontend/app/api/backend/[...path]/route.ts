@@ -43,6 +43,13 @@ async function proxyRequest(req: NextRequest) {
   resHeaders.delete("content-encoding");
   resHeaders.delete("transfer-encoding");
 
+  if (res.status === 204) {
+    return new NextResponse(null, {
+      status: res.status,
+      headers: resHeaders,
+    });
+  }
+
   return new NextResponse(resBody, {
     status: res.status,
     headers: resHeaders,
