@@ -1,8 +1,11 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.models.document import Document 
+from app.models.chat import Conversation, Message
+
 
 from app.api.deps import (
     get_current_user,
@@ -18,6 +21,7 @@ from app.schemas.workspace import (
     MemberUpdate,
     WorkspaceCreate,
     WorkspaceRead,
+    WorkspaceUpdate,
 )
 
 router = APIRouter()
@@ -326,4 +330,56 @@ async def remove_member(
     await db.delete(target_membership)
     await db.commit()
 
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/{workspace_id}", response_model=WorkspaceRead)
+async def update_workspace(
+    workspace_id: UUID,
+    payload: WorkspaceUpdate,
+    workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
+    db: AsyncSession = Depends(get_db),
+):
+    workspace, membership = workspace_membership
+    
+    # Only owners can rename workspaces
+    require_workspace_role(membership, {"owner"})
+    
+    workspace.name = payload.name
+    await db.commit()
+    await db.refresh(workspace)
+    
+    return serialize_workspace(workspace, membership.role)
+
+@router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_workspace(
+    workspace_id: UUID,
+    workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
+    db: AsyncSession = Depends(get_db),
+):
+    workspace, membership = workspace_membership
+    
+    # Only owners can delete workspaces
+    require_workspace_role(membership, {"owner"})
+    
+    # 1. Cleanup related data to avoid foreign key constraint errors
+    # (For MVP, we clean the DB. MinIO/Qdrant cleanup would be a background task in production)
+    
+    # Delete Messages (linked to Conversations)
+    conv_ids = select(Conversation.id).where(Conversation.workspace_id == workspace.id)
+    await db.execute(delete(Message).where(Message.conversation_id.in_(conv_ids)))
+    
+    # Delete Conversations
+    await db.execute(delete(Conversation).where(Conversation.workspace_id == workspace.id))
+    
+    # Delete Documents
+    await db.execute(delete(Document).where(Document.workspace_id == workspace.id))
+    
+    # Delete Memberships
+    await db.execute(delete(Membership).where(Membership.workspace_id == workspace.id))
+    
+    # 2. Delete Workspace
+    await db.delete(workspace)
+    await db.commit()
+    
     return Response(status_code=status.HTTP_204_NO_CONTENT)

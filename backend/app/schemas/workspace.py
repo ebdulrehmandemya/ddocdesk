@@ -24,6 +24,13 @@ class WorkspaceCreate(BaseModel):
     def strip_name(cls, value: str) -> str:
         return value.strip()
 
+class WorkspaceUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("name")
+    @classmethod
+    def strip_name(cls, value: str) -> str:
+        return value.strip()
 
 class WorkspaceRead(BaseModel):
     id: UUID

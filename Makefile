@@ -16,7 +16,7 @@ infra-down:
 
 # Start local development servers (placeholders for now)
 dev:
-	@echo "Run 'npm run dev' in ./frontend and 'uvicorn app.main:app --reload' in ./backend"
+	@echo "Run 'npm run dev' in ./frontend and 'source ./venv/bin/activate;uvicorn app.main:app --reload --port 8000' in ./backend"
 
 # Run health checks against infrastructure
 check:

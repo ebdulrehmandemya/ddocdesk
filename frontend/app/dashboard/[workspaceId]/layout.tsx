@@ -10,8 +10,7 @@ export default function WorkspaceLayout({
   children: React.ReactNode, 
   params: any 
 }) {
-  // Handles both Next.js 14 (object) and Next.js 15 (Promise) params
-  const { workspaceId } = typeof params.then === 'function' ? use(params) : params;
+  const { workspaceId } = "then" in params ? use(params) : params;
   const pathname = usePathname();
   
   const links = [
@@ -21,9 +20,10 @@ export default function WorkspaceLayout({
   ];
 
   return (
-    <div className="flex min-h-screen bg-slate-50">
-      <aside className="w-64 bg-slate-900 text-white p-6 flex flex-col gap-2">
-        <Link href="/dashboard" className="text-xl font-bold mb-8 hover:text-blue-400 transition flex items-center gap-2">
+    // h-[calc(100vh-4rem)] accounts for the sticky header above
+    <div className="flex h-[calc(100vh-4rem)]"> 
+      <aside className="w-64 bg-slate-900 dark:bg-black text-white p-6 flex flex-col gap-2 border-r border-slate-800">
+        <Link href="/dashboard" className="text-lg font-bold mb-8 hover:text-blue-400 transition flex items-center gap-2 text-slate-300">
           <span>←</span> Workspaces
         </Link>
         {links.map(l => (
@@ -31,14 +31,16 @@ export default function WorkspaceLayout({
             key={l.href} 
             href={l.href} 
             className={`p-3 rounded-lg transition flex items-center gap-3 ${
-              pathname.startsWith(l.href) ? 'bg-blue-600 text-white' : 'hover:bg-slate-800 text-slate-300'
+              pathname.startsWith(l.href) 
+                ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20' 
+                : 'hover:bg-slate-800 text-slate-400 hover:text-white'
             }`}
           >
             <span>{l.icon}</span> {l.label}
           </Link>
         ))}
       </aside>
-      <main className="flex-1 p-8 overflow-auto">
+      <main className="flex-1 p-8 overflow-auto bg-slate-50 dark:bg-slate-950">
         {children}
       </main>
     </div>
