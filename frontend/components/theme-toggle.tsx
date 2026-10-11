@@ -1,27 +1,32 @@
-"use client";
+"use client"
 
-import * as React from "react";
-import { useTheme } from "next-themes";
+import * as React from "react"
+import { useTheme } from "next-themes"
+
+// This is required by useSyncExternalStore but does nothing
+const emptySubscribe = () => () => {}
 
 export function ThemeToggle() {
-  const { theme, setTheme } = useTheme();
-  const [mounted, setMounted] = React.useState(false);
-
-  React.useEffect(() => {
-    setMounted(true);
-  }, []);
+  const { theme, setTheme } = useTheme()
+  
+  // useSyncExternalStore safely detects if we are on the client
+  // without triggering the "setState in effect" compiler warning.
+  const mounted = React.useSyncExternalStore(
+    emptySubscribe,
+    () => true,  // Returns true on the client
+    () => false  // Returns false on the server
+  )
 
   if (!mounted) {
-    return (
-      <div className="h-9 w-32 bg-slate-200 dark:bg-slate-800 rounded-lg animate-pulse" />
-    );
+    // Render a placeholder skeleton during SSR to prevent hydration mismatches
+    return <div className="h-9 w-32 bg-slate-200 dark:bg-slate-800 rounded-lg animate-pulse" />
   }
 
   const options = [
     { value: "light", label: "☀️", title: "Light" },
     { value: "dark", label: "🌙", title: "Dark" },
     { value: "system", label: "💻", title: "System" },
-  ];
+  ]
 
   return (
     <div className="inline-flex rounded-lg border border-slate-300 dark:border-slate-700 p-1 bg-slate-100 dark:bg-slate-800">
@@ -40,5 +45,5 @@ export function ThemeToggle() {
         </button>
       ))}
     </div>
-  );
+  )
 }
