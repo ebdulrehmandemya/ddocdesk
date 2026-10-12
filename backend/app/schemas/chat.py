@@ -26,3 +26,4 @@ class ConversationRead(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     conversation_id: Optional[UUID] = None
+    document_ids: Optional[list[UUID]] = None  
