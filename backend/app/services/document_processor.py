@@ -3,11 +3,13 @@ from pypdf import PdfReader
 from docx import Document as DocxDocument
 import io
 from qdrant_client.http.models import PointStruct
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.services.qdrant_client import qdrant_client, COLLECTION_NAME
 from app.services.embeddings import get_embeddings_batch
+from app.models.document import DocumentChunk
 
 def extract_text(file_bytes: bytes, mime_type: str) -> str:
-    # ... (same as before) ...
     if mime_type == "application/pdf":
         reader = PdfReader(io.BytesIO(file_bytes))
         return "\n".join([page.extract_text() or "" for page in reader.pages]).strip()
@@ -19,9 +21,7 @@ def extract_text(file_bytes: bytes, mime_type: str) -> str:
     raise ValueError(f"Unsupported mime type: {mime_type}")
 
 def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[str]:
-    """Split text into overlapping chunks."""
-    if not text:
-        return []
+    if not text: return []
     chunks = []
     start = 0
     while start < len(text):
@@ -30,32 +30,44 @@ def chunk_text(text: str, chunk_size: int = 1000, overlap: int = 200) -> list[st
         start += chunk_size - overlap
     return chunks
 
-async def index_document(document_id: uuid.UUID, workspace_id: uuid.UUID, text: str):
-    """Chunk text, embed, and store in Qdrant."""
+async def index_document(document_id: uuid.UUID, workspace_id: uuid.UUID, text: str, db: AsyncSession):
+    """Chunk text, save to Postgres for keyword search, embed, and store in Qdrant."""
     chunks = chunk_text(text)
     if not chunks:
         return
 
-    # Generate embeddings
+    # 1. Save chunks to PostgreSQL for Full-Text Search
+    db_chunks = [
+        DocumentChunk(
+            document_id=document_id, 
+            workspace_id=workspace_id, 
+            chunk_index=i, 
+            text=chunk
+        ) for i, chunk in enumerate(chunks)
+    ]
+    db.add_all(db_chunks)
+    await db.flush() # Generates the UUIDs for the chunks
+
+    # 2. Generate embeddings
     vectors = await get_embeddings_batch(chunks)
 
-    # Prepare points for Qdrant
+    # 3. Prepare points for Qdrant
     points = []
-    for i, (chunk_content, vector) in enumerate(zip(chunks, vectors)):
+    for db_chunk, vector in zip(db_chunks, vectors):
         points.append(
             PointStruct(
-                id=str(uuid.uuid4()), # Unique ID for the chunk
+                id=str(db_chunk.id), # Use DB chunk ID as Qdrant point ID
                 vector=vector,
                 payload={
                     "document_id": str(document_id),
                     "workspace_id": str(workspace_id),
-                    "chunk_index": i,
-                    "text": chunk_content
+                    "chunk_index": db_chunk.chunk_index,
+                    "text": db_chunk.text
                 }
             )
         )
 
-    # Upsert to Qdrant
+    # 4. Upsert to Qdrant
     qdrant_client.upsert(
         collection_name=COLLECTION_NAME,
         points=points

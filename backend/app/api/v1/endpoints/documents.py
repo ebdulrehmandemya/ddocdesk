@@ -46,7 +46,7 @@ async def process_document_task(document_id: uuid.UUID):
             # Run blocking PyPDF/Docx call in thread
             text = await asyncio.to_thread(extract_text, file_bytes, document.mime_type)
 
-            await index_document(document.id, document.workspace_id, text)
+            await index_document(document.id, document.workspace_id, text, db)
 
             document.extracted_text = text
             document.status = DocumentStatus.READY
