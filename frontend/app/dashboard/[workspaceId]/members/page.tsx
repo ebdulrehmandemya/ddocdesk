@@ -236,7 +236,7 @@ export default function MembersPage({ params }: PageProps) {
             </button>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-            If the person already has an account they're added immediately. Otherwise an invite link is generated.
+            If the person already has an account they&apos;re added immediately. Otherwise an invite link is generated.
           </p>
         </form>
       )}
