@@ -6,6 +6,7 @@ from app.models.document import DocumentStatus
 class DocumentRead(BaseModel):
     id: UUID
     workspace_id: UUID
+    folder_id: UUID | None = None
     file_name: str
     mime_type: str
     size_bytes: int

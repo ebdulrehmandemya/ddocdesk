@@ -2,6 +2,7 @@ import uuid
 import asyncio
 import io
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status, Response
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status, Response, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,7 +10,8 @@ from app.api.deps import get_workspace_membership, get_current_user, require_wor
 from app.db.session import get_db, SessionLocal
 from app.models.user import User
 from app.models.workspace import Membership, Workspace
-from app.models.document import Document, DocumentStatus
+from app.models.document import Document, DocumentStatus,DocumentChunk
+from app.models.folder import Folder
 from app.schemas.document import DocumentRead
 from app.services.minio_client import s3_client
 from app.services.document_processor import extract_text
@@ -53,9 +55,13 @@ async def process_document_task(document_id: uuid.UUID):
             await db.commit()
             
         except Exception as e:
-            print(f"Processing failed for {document_id}: {e}")
+            import traceback
+            error_detail = traceback.format_exc()
+            print(f"❌ Processing failed for {document_id}: {e}")
+            print(error_detail)
             document.status = DocumentStatus.FAILED
             await db.commit()
+
 
 @router.post(
     "/{workspace_id}/documents",
@@ -66,6 +72,7 @@ async def upload_document(
     workspace_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    folder_id: uuid.UUID | None = Query(None), # NEW: Accept folder ID
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -75,18 +82,22 @@ async def upload_document(
     
     if not file.filename or not file.content_type:
          raise HTTPException(status_code=400, detail="Invalid file metadata")
-    
-    ext = "." + file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"File type {ext} not allowed. Allowed: {ALLOWED_EXTENSIONS}")
+         
+    # Security: Validate that the folder belongs to this workspace
+    if folder_id:
+        folder_stmt = select(Folder).where(Folder.id == folder_id, Folder.workspace_id == workspace.id)
+        folder_res = await db.execute(folder_stmt)
+        if not folder_res.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Folder not found in this workspace")
 
     contents = await file.read()
     size_bytes = len(contents)
     
-    # Generate a unique key: workspace_id/uuid/filename
-    minio_key = f"{workspace_id}/{uuid.uuid4()}/{file.filename}"
+    # Generate a unique key: workspace_id/folder_id/uuid/filename
+    folder_path = str(folder_id) if folder_id else "root"
+    minio_key = f"{workspace_id}/{folder_path}/{uuid.uuid4()}/{file.filename}"
     
-    # Upload to MinIO (run in thread to avoid blocking)
+    # Upload to MinIO
     await asyncio.to_thread(
         s3_client.put_object,
         Bucket=BUCKET_NAME,
@@ -97,6 +108,7 @@ async def upload_document(
     
     document = Document(
         workspace_id=workspace_id,
+        folder_id=folder_id, # NEW: Assign the folder ID
         uploaded_by_id=current_user.id,
         file_name=file.filename,
         mime_type=file.content_type,
@@ -113,14 +125,25 @@ async def upload_document(
     
     return document
 
+
 @router.get("/{workspace_id}/documents", response_model=list[DocumentRead])
 async def list_documents(
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
+    folder_id: uuid.UUID | None = None,  # NEW: Optional folder filter
+    root_only: bool = False,  # NEW: Show only root documents
     db: AsyncSession = Depends(get_db),
 ):
     workspace, _ = workspace_membership
-    statement = select(Document).where(Document.workspace_id == workspace.id).order_by(Document.created_at.desc())
-    result = await db.execute(statement)
+
+    stmt = select(Document).where(Document.workspace_id == workspace.id)
+
+    if root_only:
+        stmt = stmt.where(Document.folder_id.is_(None))
+    elif folder_id:
+        stmt = stmt.where(Document.folder_id == folder_id)
+
+    stmt = stmt.order_by(Document.created_at.desc())
+    result = await db.execute(stmt)
     return result.scalars().all()
 
 
@@ -189,8 +212,13 @@ async def delete_document(
         s3_client.delete_object(Bucket=BUCKET_NAME, Key=doc.minio_key)
     await asyncio.to_thread(delete_file)
 
-    # 3. Delete from PostgreSQL (Metadata & Citations)
-    # Note: If you have foreign keys from Messages to Documents, you'd delete them here too.
+    # 3. Delete from PostgreSQL (Chunks first, then Document)
+    # Delete the chunks from the database to satisfy the foreign key constraint
+    await db.execute(
+        sql_delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
+    )
+    
+    # Now it's safe to delete the document metadata
     await db.delete(doc)
     await db.commit()
     
