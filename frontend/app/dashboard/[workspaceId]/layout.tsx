@@ -17,6 +17,7 @@ export default function WorkspaceLayout({ children, params }:  LayoutProps) {
     { href: `/dashboard/${workspaceId}/documents`, label: "Documents", icon: "📄" },
     { href: `/dashboard/${workspaceId}/search`, label: "Search", icon: "🔍" },
     { href: `/dashboard/${workspaceId}/chat`, label: "AI Chat", icon: "🤖" },
+    { href: `/dashboard/${workspaceId}/members`, label: "Members", icon: "👥" },
   ];
 
   return (

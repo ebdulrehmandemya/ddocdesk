@@ -16,6 +16,18 @@ class Settings(BaseSettings):
     # Keycloak
     KEYCLOAK_ISSUER_URL: str = "http://localhost:8080/realms/ddocdesk"
 
+        # SMTP / Email
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 1025
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_STARTTLS: bool = False
+    SMTP_FROM: str = "noreply@ddocdesk.io"
+
+    # App
+    APP_URL: str = "http://localhost:3000"
+    INVITATION_EXPIRY_DAYS: int = 7
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parent.parent.parent.parent / ".env",
         env_file_encoding="utf-8",

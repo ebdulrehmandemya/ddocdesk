@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   OIDC_STATE_COOKIE,
   OIDC_VERIFIER_COOKIE,
+  OIDC_NEXT_COOKIE,
   SESSION_COOKIE,
   generateSessionId,
   saveSession,
@@ -125,7 +126,13 @@ export async function GET(request: NextRequest) {
       expiresAt,
     });
 
-    const response = NextResponse.redirect(new URL("/", appUrl));
+    const nextCookie = request.cookies.get(OIDC_NEXT_COOKIE)?.value;
+    const target =
+      nextCookie && nextCookie.startsWith("/") && !nextCookie.startsWith("//")
+        ? nextCookie
+        : "/";
+
+    const response = NextResponse.redirect(new URL(target, appUrl));
 
     response.cookies.set({
       name: SESSION_COOKIE,
@@ -139,6 +146,7 @@ export async function GET(request: NextRequest) {
 
     response.cookies.delete(OIDC_STATE_COOKIE);
     response.cookies.delete(OIDC_VERIFIER_COOKIE);
+    response.cookies.delete(OIDC_NEXT_COOKIE);
 
     return response;
   } catch (error) {

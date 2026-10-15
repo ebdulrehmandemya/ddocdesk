@@ -83,6 +83,14 @@ services:
   #     timeout: 5s
   #     retries: 5
 
+  mailpit:
+      image: axllent/mailpit:latest
+      container_name: ddocdesk-mailpit
+      ports:
+        - "1025:1025"   # SMTP
+        - "8025:8025"   # Web UI
+      restart: unless-stopped
+
 volumes:
   postgres_data:
   minio_data:

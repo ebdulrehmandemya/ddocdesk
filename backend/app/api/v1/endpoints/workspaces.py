@@ -5,6 +5,7 @@ from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document 
 from app.models.chat import Conversation, Message
+from app.models.invitation import Invitation
 
 
 from app.api.deps import (
@@ -377,7 +378,10 @@ async def delete_workspace(
     
     # Delete Memberships
     await db.execute(delete(Membership).where(Membership.workspace_id == workspace.id))
-    
+
+    # cleanup Invitation:
+    await db.execute(delete(Invitation).where(Invitation.workspace_id == workspace.id))
+
     # 2. Delete Workspace
     await db.delete(workspace)
     await db.commit()
