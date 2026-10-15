@@ -108,7 +108,7 @@ export default function InvitePage({ params }: PageProps) {
             ) : (
               <>
                 <p className="text-slate-600 dark:text-slate-300 mb-6">
-                  You've been invited to join{" "}
+                  You&apos;ve been invited to join{" "}
                   <span className="font-semibold text-slate-900 dark:text-white">
                     {invitation.workspace_name}
                   </span>{" "}
@@ -143,7 +143,7 @@ export default function InvitePage({ params }: PageProps) {
                   </button>
                 ) : (
                   <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-sm">
-                    You're signed in as <span className="font-medium">{session.user?.email}</span>,
+                    You&apos;re signed in as <span className="font-medium">{session.user?.email}</span>,
                     but this invitation was sent to{" "}
                     <span className="font-medium">{invitation.email}</span>.
                     <div className="mt-3">
