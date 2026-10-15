@@ -2,338 +2,267 @@
 import { useState, useRef, useEffect, use } from "react";
 import { apiFetch } from "@/lib/api";
 
-interface Message {
-  id: string;
-  conversation_id: string;
-  role: string;
-  content: string;
-  citations?: {
-    document_id: string;
-    chunk_index: number;
-    text: string;
-    file_name: string;
-  }[];
+interface Citation {
+  document_id: string;
+  chunk_index: number;
+  text: string;
+  file_name: string;
 }
 
-interface ChatDocument {
-  id: string;
-  file_name: string;
-  mime_type: string;
+interface Message { 
+  id: string; 
+  role: string; 
+  content: string; 
+  conversation_id: string;
+  citations?: Citation[]; 
 }
 
 interface PageProps {
   params: { workspaceId: string } | Promise<{ workspaceId: string }>;
 }
 
-function FileIcon({ fileName }: { fileName: string }) {
-  if (fileName.endsWith(".pdf")) return <span>📕</span>;
-  if (fileName.endsWith(".docx")) return <span>📘</span>;
-  return <span>📄</span>;
-}
-
 export default function ChatPage({ params }: PageProps) {
   const { workspaceId } = "then" in params ? use(params) : params;
-
+  
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [convId, setConvId] = useState<string | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // Document selection state
-  const [allDocs, setAllDocs] = useState<ChatDocument[]>([]);
-  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
-  const [showDocPicker, setShowDocPicker] = useState(false);
+  // Context Filter State
+  const [availableDocs, setAvailableDocs] = useState<{id: string, file_name: string, status: string}[]>([]);
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [showSelector, setShowSelector] = useState(false);
+
+  // NEW: Active Citation State
+  const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Fetch eligible documents on mount
   useEffect(() => {
-    let isMounted = true;
+    let isActive = true;
     async function loadDocs() {
       try {
-        const data = await apiFetch<ChatDocument[]>(`/workspaces/${workspaceId}/chat/documents`);
-        if (isMounted) setAllDocs(data);
-      } catch (e) {
-        console.error(e);
-      }
+        const docs = await apiFetch<{id: string, file_name: string, status: string}[]>(`/workspaces/${workspaceId}/documents`);
+        if (isActive) setAvailableDocs(docs.filter(d => d.status === "ready"));
+      } catch (e) { console.error(e); }
     }
     loadDocs();
-    return () => { isMounted = false; };
+    return () => { isActive = false; };
   }, [workspaceId]);
 
-  const toggleDoc = (docId: string) => {
-    setSelectedDocIds(prev => {
-      const next = new Set(prev);
-      if (next.has(docId)) {
-        next.delete(docId);
-      } else {
-        next.add(docId);
-      }
-      return next;
-    });
-  };
-
-  const clearSelection = () => {
-    setSelectedDocIds(new Set());
+  const toggleDoc = (id: string) => {
+    setSelectedDocIds(prev => prev.includes(id) ? prev.filter(d => d !== id) : [...prev, id]);
   };
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
-
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      conversation_id: convId || "",
-      role: "user",
-      content: input,
-    };
+    
+    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: input, conversation_id: "" };
     setMessages(prev => [...prev, userMsg]);
     setInput("");
     setLoading(true);
 
     try {
-      const body: Record<string, unknown> = {
-        query: input,
-        conversation_id: convId,
-      };
-
-      // Only include document_ids if user selected specific docs
-      if (selectedDocIds.size > 0) {
-        body.document_ids = Array.from(selectedDocIds);
-      }
-
       const data = await apiFetch<Message>(`/workspaces/${workspaceId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({ 
+          query: input, 
+          conversation_id: convId,
+          document_ids: selectedDocIds.length > 0 ? selectedDocIds : undefined
+        }),
       });
-
       setMessages(prev => [...prev, data]);
       setConvId(data.conversation_id);
-    } catch (e) {
+    } catch (e) { 
       console.error(e);
-      setMessages(prev => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          conversation_id: convId || "",
-          role: "assistant",
-          content: "Error communicating with the AI. Please try again.",
-        },
-      ]);
-    } finally {
-      setLoading(false);
+      setMessages(prev => [...prev, { id: crypto.randomUUID(), role: "assistant", content: "Error communicating with AI.", conversation_id: "" }]);
+    } finally { 
+      setLoading(false); 
     }
   };
 
-  const selectedDocNames = allDocs
-    .filter(d => selectedDocIds.has(d.id))
-    .map(d => d.file_name);
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    // You could add a toast notification here in the future
+  };
 
   return (
-    <div className="max-w-4xl mx-auto h-[calc(100vh-8rem)] flex flex-col">
+    <div className="max-w-7xl mx-auto h-[calc(100vh-8rem)] flex flex-col">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-          AI Document Assistant
-        </h1>
-
-        {/* Document scope toggle */}
-        <div className="relative">
-          <button
-            onClick={() => setShowDocPicker(!showDocPicker)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium border transition-colors flex items-center gap-2 ${
-              selectedDocIds.size > 0
-                ? "bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
-                : "bg-white dark:bg-slate-900 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:border-slate-400"
-            }`}
+        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">AI Document Assistant</h1>
+        {activeCitation && (
+          <button 
+            onClick={() => setActiveCitation(null)}
+            className="text-sm text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors flex items-center gap-1"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-              <polyline points="14 2 14 8 20 8" />
-            </svg>
-            {selectedDocIds.size > 0
-              ? `${selectedDocIds.size} document${selectedDocIds.size > 1 ? "s" : ""} selected`
-              : "All documents"}
-            <span className="text-xs">▼</span>
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            Close Source Panel
           </button>
-
-          {/* Dropdown picker */}
-          {showDocPicker && (
-            <div className="absolute right-0 top-12 z-20 w-80 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl p-3">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Scope AI to specific documents
-                </span>
-                <button
-                  onClick={() => setShowDocPicker(false)}
-                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="max-h-60 overflow-y-auto space-y-1 mb-3">
-                {allDocs.length === 0 && (
-                  <p className="text-sm text-slate-400 py-4 text-center">
-                    No processed documents yet.
-                  </p>
-                )}
-                {allDocs.map(doc => (
-                  <label
-                    key={doc.id}
-                    className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedDocIds.has(doc.id)}
-                      onChange={() => toggleDoc(doc.id)}
-                      className="w-4 h-4 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
-                    />
-                    <FileIcon fileName={doc.file_name} />
-                    <span className="text-sm text-slate-700 dark:text-slate-300 truncate">
-                      {doc.file_name}
-                    </span>
-                  </label>
-                ))}
-              </div>
-
-              <div className="flex gap-2 border-t border-slate-100 dark:border-slate-800 pt-3">
-                <button
-                  onClick={clearSelection}
-                  className="flex-1 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
-                >
-                  Use all documents
-                </button>
-                <button
-                  onClick={() => setShowDocPicker(false)}
-                  className="flex-1 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Done
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Active scope indicator */}
-      {selectedDocIds.size > 0 && (
-        <div className="mb-3 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-semibold text-blue-700 dark:text-blue-300 uppercase tracking-wide">
-            AI scoped to:
-          </span>
-          {selectedDocNames.map((name, i) => (
-            <span
-              key={i}
-              className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-xs rounded-full font-medium"
-            >
-              {name}
-            </span>
-          ))}
-          <button
-            onClick={clearSelection}
-            className="ml-auto text-xs text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            Clear
-          </button>
-        </div>
-      )}
-
-      {/* Chat messages */}
-      <div className="flex-1 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 mb-4 space-y-6 shadow-inner">
-        {messages.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500 gap-4">
-            <div className="text-5xl">🤖</div>
-            <p className="text-center max-w-sm">
-              Ask a question about your uploaded documents.
-              {selectedDocIds.size > 0
-                ? ` Currently scoped to ${selectedDocIds.size} document${selectedDocIds.size > 1 ? "s" : ""}.`
-                : " Searching all documents in this workspace."}
-            </p>
-          </div>
         )}
-
-        {messages.map(m => (
-          <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[85%] p-4 rounded-2xl shadow-sm ${
-                m.role === "user"
-                  ? "bg-blue-600 text-white rounded-br-none"
-                  : "bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-bl-none"
-              }`}
-            >
-              <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
-
-              {m.citations && m.citations.length > 0 && (
-                <div className={`mt-3 pt-3 border-t ${m.role === "user" ? "border-blue-400/50" : "border-slate-300/50 dark:border-slate-600/50"}`}>
-                  <p className={`text-xs font-bold mb-2 uppercase tracking-wide ${m.role === "user" ? "text-blue-200" : "text-slate-500 dark:text-slate-400"}`}>
-                    Sources:
-                  </p>
-                  <div className="space-y-2">
-                    {m.citations.map((c, i) => (
-                      <details
-                        key={i}
-                        className="text-sm bg-white/50 dark:bg-slate-900/50 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden"
-                      >
-                        <summary className="cursor-pointer p-2 font-medium text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 transition flex justify-between items-center">
-                          <span className="flex items-center gap-1.5">
-                            <FileIcon fileName={c.file_name} />
-                            {c.file_name}
-                            <span className="text-xs text-slate-500 dark:text-slate-400">
-                              (Chunk {c.chunk_index})
-                            </span>
-                          </span>
-                          <span className="text-xs">▼</span>
-                        </summary>
-                        <p className="p-3 bg-slate-50 dark:bg-slate-950 text-slate-600 dark:text-slate-400 text-xs italic border-t border-slate-200 dark:border-slate-700 leading-relaxed">
-                          {c.text}
-                        </p>
-                      </details>
-                    ))}
-                  </div>
+      </div>
+      
+      <div className="flex-1 flex gap-4 min-h-0">
+        {/* LEFT SIDE: Chat Area */}
+        <div className={`flex flex-col transition-all duration-300 ease-in-out ${activeCitation ? 'w-3/5' : 'w-full'}`}>
+          <div className="flex-1 overflow-y-auto bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 mb-4 space-y-6 shadow-inner">
+            {messages.length === 0 && (
+              <div className="h-full flex items-center justify-center text-slate-400 dark:text-slate-500">
+                <p>Ask a question about your uploaded documents...</p>
+              </div>
+            )}
+            {messages.map(m => (
+              <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[85%] p-4 rounded-2xl shadow-sm ${
+                  m.role === 'user' 
+                    ? 'bg-blue-600 text-white rounded-br-none' 
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-bl-none'
+                }`}>
+                  <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                  
+                  {/* NEW: Clickable Citation Pills */}
+                  {m.citations && m.citations.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-slate-300/50 dark:border-slate-600/50">
+                      <p className="text-xs font-bold mb-2 text-slate-500 dark:text-slate-400 uppercase tracking-wide">Sources:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {m.citations.map((c, i) => (
+                          <button
+                            key={i}
+                            onClick={() => setActiveCitation(c)}
+                            className={`text-xs px-2.5 py-1.5 rounded-md border transition-all flex items-center gap-1.5 ${
+                              activeCitation?.text === c.text
+                                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-300 shadow-sm'
+                                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 hover:border-blue-300 dark:hover:border-blue-700'
+                            }`}
+                          >
+                            <span>📄</span>
+                            <span className="font-medium truncate max-w-[120px]">{c.file_name}</span>
+                            <span className="text-slate-400 dark:text-slate-500">#{c.chunk_index}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-2xl rounded-bl-none text-slate-500 flex gap-1">
+                  <span className="animate-bounce">●</span>
+                  <span className="animate-bounce" style={{animationDelay: '0.2s'}}>●</span>
+                  <span className="animate-bounce" style={{animationDelay: '0.4s'}}>●</span>
+                </div>
+              </div>
+            )}
+            <div ref={chatEndRef} />
           </div>
-        ))}
 
-        {loading && (
-          <div className="flex justify-start">
-            <div className="bg-slate-100 dark:bg-slate-800 p-4 rounded-2xl rounded-bl-none text-slate-500 dark:text-slate-400 flex gap-1">
-              <span className="animate-bounce">●</span>
-              <span className="animate-bounce" style={{ animationDelay: "0.2s" }}>●</span>
-              <span className="animate-bounce" style={{ animationDelay: "0.4s" }}>●</span>
+          {/* Context Filter Panel */}
+          <div className="mb-2">
+            <button 
+              onClick={() => setShowSelector(!showSelector)}
+              className="flex items-center gap-2 text-sm font-medium text-slate-600 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+            >
+              <span>📚</span>
+              <span>
+                {selectedDocIds.length === 0 
+                  ? "Context: All Documents" 
+                  : `Context: ${selectedDocIds.length} Document${selectedDocIds.length > 1 ? 's' : ''} selected`}
+              </span>
+              <svg className={`w-4 h-4 transition-transform ${showSelector ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {showSelector && (
+              <div className="mt-2 p-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-lg max-h-32 overflow-y-auto">
+                <div className="grid grid-cols-2 gap-2">
+                  {availableDocs.map(doc => (
+                    <label key={doc.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors">
+                      <input 
+                        type="checkbox" 
+                        checked={selectedDocIds.includes(doc.id)}
+                        onChange={() => toggleDoc(doc.id)}
+                        className="rounded border-slate-300 dark:border-slate-700 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-slate-700 dark:text-slate-300 truncate">{doc.file_name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Chat Input */}
+          <form onSubmit={handleSend} className="flex gap-2">
+            <input 
+              type="text" value={input} onChange={e => setInput(e.target.value)}
+              placeholder={selectedDocIds.length > 0 ? "Ask about selected documents..." : "Type your question..."} 
+              className="flex-1 p-4 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400"
+              disabled={loading}
+            />
+            <button type="submit" disabled={loading} className="px-8 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 font-medium shadow-sm transition">
+              Send
+            </button>
+          </form>
+        </div>
+
+        {/* RIGHT SIDE: Source Citation Panel */}
+        {activeCitation && (
+          <div className="w-2/5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-lg flex flex-col overflow-hidden animate-in slide-in-from-right-5 duration-300">
+            {/* Panel Header */}
+            <div className="p-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-xl">
+                  {activeCitation.file_name.endsWith(".pdf") ? "📕" : activeCitation.file_name.endsWith(".docx") ? "📘" : "📄"}
+                </span>
+                <div className="min-w-0">
+                  <h3 className="font-semibold text-slate-900 dark:text-white truncate text-sm">{activeCitation.file_name}</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Chunk #{activeCitation.chunk_index}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => copyToClipboard(activeCitation.text)}
+                  className="p-2 text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                  title="Copy text"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+                <button 
+                  onClick={() => setActiveCitation(null)}
+                  className="p-2 text-slate-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                  title="Close"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Panel Body */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="prose prose-slate dark:prose-invert max-w-none">
+                <p className="text-slate-700 dark:text-slate-300 leading-relaxed whitespace-pre-wrap text-sm">
+                  {activeCitation.text}
+                </p>
+              </div>
+            </div>
+            
+            {/* Panel Footer */}
+            <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 text-center">
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                Source ID: <span className="font-mono">{activeCitation.document_id.slice(0, 8)}...</span>
+              </p>
             </div>
           </div>
         )}
-        <div ref={chatEndRef} />
       </div>
-
-      {/* Input */}
-      <form onSubmit={handleSend} className="flex gap-2">
-        <input
-          type="text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          placeholder={
-            selectedDocIds.size > 0
-              ? `Ask about ${selectedDocIds.size} selected document${selectedDocIds.size > 1 ? "s" : ""}...`
-              : "Ask about all documents..."
-          }
-          className="flex-1 p-4 border border-slate-300 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none shadow-sm bg-white dark:bg-slate-900 text-slate-900 dark:text-white placeholder-slate-400"
-          disabled={loading}
-        />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          className="px-8 py-4 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium shadow-sm transition"
-        >
-          Send
-        </button>
-      </form>
     </div>
   );
 }
