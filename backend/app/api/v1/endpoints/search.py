@@ -5,6 +5,8 @@ from pydantic import BaseModel
 from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Request
+from app.services.audit import log_event
 
 from app.db.session import get_db, SessionLocal
 from app.api.deps import get_workspace_membership
@@ -73,10 +75,11 @@ def reciprocal_rank_fusion(semantic_results, keyword_results, k=60):
 async def search_documents(
     workspace_id: UUID,
     query: SearchQuery,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
     db: AsyncSession = Depends(get_db),
 ):
-    workspace, _ = workspace_membership
+    workspace, membership = workspace_membership
     
     # 1. Semantic Search (Qdrant)
     query_vector = await get_embedding(query.query)
@@ -115,7 +118,17 @@ async def search_documents(
     docs_stmt = select(Document).where(Document.id.in_(doc_ids))
     docs_res = await db.execute(docs_stmt)
     docs_map = {str(d.id): d.file_name for d in docs_res.scalars().all()}
+
     
+    await log_event(
+        db, "search.performed",
+        workspace_id=workspace.id,
+        user_id=membership.user_id,
+        metadata={"query": query.query[:200], "results": len(final_results)},
+        request=request,
+    )
+    await db.commit()
+
     # 5. Return top N with file names
     return [
         SearchResult(

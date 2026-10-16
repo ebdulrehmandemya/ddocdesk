@@ -15,6 +15,8 @@ from app.schemas.chat import ChatRequest, MessageRead, ConversationRead, Citatio
 from app.services.qdrant_client import qdrant_client, COLLECTION_NAME
 from app.services.embeddings import get_embedding
 from app.services.llm import generate_answer
+from fastapi import Request
+from app.services.audit import log_event
 
 router = APIRouter()
 
@@ -48,6 +50,7 @@ async def list_chat_eligible_documents(
 async def chat_with_documents(
     workspace_id: uuid.UUID,
     payload: ChatRequest,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -167,6 +170,17 @@ async def chat_with_documents(
     await db.commit()
     await db.refresh(assistant_msg)
 
+    await log_event(
+        db, "chat.question_asked",
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        resource_type="conversation",
+        resource_id=conv.id,
+        metadata={"query": payload.query[:200], "docs_scoped": bool(payload.document_ids)},
+        request=request,
+    )
+    await db.commit()
+    
     return assistant_msg
 
 

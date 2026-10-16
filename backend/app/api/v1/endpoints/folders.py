@@ -1,5 +1,5 @@
 import uuid
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from app.models.workspace import Workspace, Membership
 from app.models.folder import Folder
 from app.models.document import Document
 from app.schemas.folder import FolderCreate, FolderUpdate, FolderRead, DocumentMove
+from app.services.audit import log_event
 
 router = APIRouter()
 
@@ -96,10 +97,11 @@ async def delete_folder(
 @router.patch("/{workspace_id}/documents/{document_id}/move", status_code=status.HTTP_200_OK)
 async def move_document(
     workspace_id: uuid.UUID, document_id: uuid.UUID, payload: DocumentMove,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
     db: AsyncSession = Depends(get_db),
 ):
-    workspace, _ = workspace_membership
+    workspace, membership = workspace_membership
     stmt = select(Document).where(Document.id == document_id, Document.workspace_id == workspace.id)
     doc = (await db.execute(stmt)).scalar_one_or_none()
     if not doc: raise HTTPException(status_code=404, detail="Document not found")
@@ -113,4 +115,16 @@ async def move_document(
 
     await db.commit()
     await db.refresh(doc)
+
+    await log_event(
+        db, "document.moved",
+        workspace_id=workspace.id,
+        user_id=membership.user_id,
+        resource_type="document",
+        resource_id=doc.id,
+        metadata={"to_folder_id": str(doc.folder_id) if doc.folder_id else None},
+        request=request,
+    )
+    await db.commit()
+
     return {"id": str(doc.id), "folder_id": str(doc.folder_id) if doc.folder_id else None}

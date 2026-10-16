@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.document import Document 
 from app.models.chat import Conversation, Message
 from app.models.invitation import Invitation
+from fastapi import Request
+from app.services.audit import log_event
 
 
 from app.api.deps import (
@@ -52,6 +54,7 @@ async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
 )
 async def create_workspace(
     payload: WorkspaceCreate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -68,6 +71,17 @@ async def create_workspace(
 
     await db.commit()
     await db.refresh(workspace)
+
+    await log_event(
+        db, "workspace.created",
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        resource_type="workspace",
+        resource_id=workspace.id,
+        metadata={"name": workspace.name},
+        request=request,
+    )
+    await db.commit()
 
     return serialize_workspace(workspace, "owner")
 
@@ -107,6 +121,7 @@ async def get_workspace(
 )
 async def add_member(
     payload: MemberAdd,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(
         get_workspace_membership
     ),
@@ -156,6 +171,17 @@ async def add_member(
     await db.commit()
     await db.refresh(new_membership)
 
+    await log_event(
+        db, "member.added",
+        workspace_id=workspace.id,
+        user_id=membership.user_id,
+        resource_type="user",
+        resource_id=target_user.id,
+        metadata={"email": target_user.email, "role": new_membership.role},
+        request=request,
+    )
+    await db.commit()
+
     return MemberRead(
         user_id=target_user.id,
         email=target_user.email,
@@ -199,6 +225,7 @@ async def list_members(
 @router.patch("/{workspace_id}/members/{user_id}", response_model=MemberRead)
 async def update_member_role(
     user_id: UUID,
+    request: Request,
     payload: MemberUpdate,
     workspace_membership: tuple[Workspace, Membership] = Depends(
         get_workspace_membership
@@ -256,6 +283,17 @@ async def update_member_role(
     await db.commit()
     await db.refresh(target_membership)
 
+    await log_event(
+        db, "member.role_changed",
+        workspace_id=workspace.id,
+        user_id=membership.user_id,
+        resource_type="user",
+        resource_id=user_id,
+        metadata={"new_role": payload.role},
+        request=request,
+    )
+    await db.commit()
+
     target_user = await db.get(User, user_id)
 
     if not target_user:
@@ -279,6 +317,7 @@ async def update_member_role(
 )
 async def remove_member(
     user_id: UUID,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(
         get_workspace_membership
     ),
@@ -331,6 +370,16 @@ async def remove_member(
     await db.delete(target_membership)
     await db.commit()
 
+    await log_event(
+        db, "member.removed",
+        workspace_id=workspace.id,
+        user_id=membership.user_id,
+        resource_type="user",
+        resource_id=user_id,
+        request=request,
+    )
+    await db.commit()
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -355,6 +404,7 @@ async def update_workspace(
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace(
     workspace_id: UUID,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
     db: AsyncSession = Depends(get_db),
 ):
@@ -362,7 +412,17 @@ async def delete_workspace(
     
     # Only owners can delete workspaces
     require_workspace_role(membership, {"owner"})
-    
+
+    await log_event(
+        db, "workspace.deleted",
+        workspace_id=workspace.id,
+        user_id=membership.user_id,
+        resource_type="workspace",
+        resource_id=workspace.id,
+        metadata={"name": workspace.name},
+        request=request,
+    )
+
     # 1. Cleanup related data to avoid foreign key constraint errors
     # (For MVP, we clean the DB. MinIO/Qdrant cleanup would be a background task in production)
     

@@ -17,6 +17,9 @@ from app.schemas.document import DocumentRead
 from app.services.minio_client import s3_client
 from app.services.document_processor import extract_text, index_document
 from app.services.qdrant_client import qdrant_client, COLLECTION_NAME
+from fastapi import Request
+from app.services.audit import log_event
+
 
 router = APIRouter()
 BUCKET_NAME = "ddocdesk-docs"
@@ -55,6 +58,7 @@ async def process_document_task(document_id: uuid.UUID):
 async def upload_document(
     workspace_id: uuid.UUID,
     background_tasks: BackgroundTasks,
+    request: Request,
     file: UploadFile = File(...),
     folder_id: uuid.UUID | None = Query(None), 
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
@@ -100,7 +104,18 @@ async def upload_document(
     db.add(document)
     await db.commit()
     await db.refresh(document)
-    
+
+    await log_event(
+        db, "document.uploaded",
+        workspace_id=workspace_id,
+        user_id=current_user.id,
+        resource_type="document",
+        resource_id=document.id,
+        metadata={"file_name": document.file_name, "size_bytes": size_bytes},
+        request=request,
+    )
+    await db.commit()
+
     background_tasks.add_task(process_document_task, document.id)
     return document
 
@@ -127,10 +142,11 @@ async def list_documents(
 async def download_document(
     workspace_id: uuid.UUID,
     document_id: uuid.UUID,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
     db: AsyncSession = Depends(get_db),
 ):
-    workspace, _ = workspace_membership
+    workspace, membership = workspace_membership
     stmt = select(Document).where(Document.id == document_id, Document.workspace_id == workspace.id)
     doc = (await db.execute(stmt)).scalar_one_or_none()
     
@@ -141,6 +157,18 @@ async def download_document(
         return s3_client.get_object(Bucket=BUCKET_NAME, Key=doc.minio_key)['Body'].read()
         
     file_bytes = await asyncio.to_thread(get_file)
+
+    await log_event(
+        db, "document.downloaded",
+        workspace_id=workspace_id,
+        user_id=membership.user_id,
+        resource_type="document",
+        resource_id=document_id,
+        metadata={"file_name": doc.file_name},
+        request=request,
+    )
+    await db.commit()
+
     return StreamingResponse(
         io.BytesIO(file_bytes),
         media_type=doc.mime_type,
@@ -151,6 +179,7 @@ async def download_document(
 async def delete_document(
     workspace_id: uuid.UUID,
     document_id: uuid.UUID,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -164,6 +193,16 @@ async def delete_document(
         
     if membership.role not in {"owner", "admin"} and doc.uploaded_by_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this document")
+
+    await log_event(
+        db, "document.deleted",
+        workspace_id=workspace_id,
+        user_id=current_user.id,
+        resource_type="document",
+        resource_id=document_id,
+        metadata={"file_name": doc.file_name},
+        request=request,
+    )
 
     def delete_vectors():
         qdrant_client.delete(

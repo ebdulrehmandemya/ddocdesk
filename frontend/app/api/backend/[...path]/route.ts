@@ -22,6 +22,11 @@ async function proxyRequest(req: NextRequest) {
   headers.delete("connection");
   headers.delete("content-length"); 
 
+  const clientIp = 
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||   "unknown";
+  headers.set("x-forwarded-for", clientIp);
+
   const method = req.method;
   let body: BodyInit | null = null;
   

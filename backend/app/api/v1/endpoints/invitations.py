@@ -2,9 +2,10 @@ import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.services.audit import log_event
 
 from app.api.deps import (
     get_current_user,
@@ -65,6 +66,7 @@ def render_email(workspace_name: str, invite_url: str, days: int) -> str:
 async def create_invitation(
     workspace_id: uuid.UUID,
     payload: InvitationCreate,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -141,6 +143,17 @@ async def create_invitation(
     await db.commit()
     await db.refresh(invitation)
 
+    await log_event(
+        db, "invitation.created",
+        workspace_id=workspace.id,
+        user_id=current_user.id,
+        resource_type="invitation",
+        resource_id=invitation.id,
+        metadata={"email": invitation.email, "role": invitation.role},
+        request=request,
+    )
+    await db.commit()
+
     await send_email(
         to=email,
         subject=f"You've been invited to {workspace.name} on dDocDesk",
@@ -181,6 +194,7 @@ async def list_invitations(
 async def revoke_invitation(
     workspace_id: uuid.UUID,
     invitation_id: uuid.UUID,
+    request: Request,
     workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
     db: AsyncSession = Depends(get_db),
 ):
@@ -200,6 +214,17 @@ async def revoke_invitation(
         raise HTTPException(status_code=404, detail="Invitation not found")
 
     inv.status = InvitationStatus.REVOKED
+    await db.commit()
+
+    await log_event(
+        db, "invitation.revoked",
+        workspace_id=workspace.id,
+        user_id=membership.user_id,
+        resource_type="invitation",
+        resource_id=invitation_id,
+        metadata={"email": inv.email},
+        request=request,
+    )
     await db.commit()
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -238,6 +263,7 @@ async def get_invitation(
 @router.post("/invitations/{token}/accept", response_model=InvitationAcceptResult)
 async def accept_invitation(
     token: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -287,6 +313,17 @@ async def accept_invitation(
     inv.status = InvitationStatus.ACCEPTED
     inv.accepted_at = datetime.now(timezone.utc)
 
+    await db.commit()
+
+    await log_event(
+        db, "invitation.accepted",
+        workspace_id=inv.workspace_id,
+        user_id=current_user.id,
+        resource_type="invitation",
+        resource_id=inv.id,
+        metadata={"email": inv.email, "role": inv.role},
+        request=request,
+    )
     await db.commit()
 
     return InvitationAcceptResult(workspace_id=inv.workspace_id, role=inv.role)
