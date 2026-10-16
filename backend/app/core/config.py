@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     APP_URL: str = "http://localhost:3000"
     INVITATION_EXPIRY_DAYS: int = 7
 
+    # Redis / Celery
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+    CELERY_TASK_TIME_LIMIT: int = 1800        # hard kill after 30 min
+    CELERY_SOFT_TIME_LIMIT: int = 1740
+
+
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parent.parent.parent.parent / ".env",
         env_file_encoding="utf-8",

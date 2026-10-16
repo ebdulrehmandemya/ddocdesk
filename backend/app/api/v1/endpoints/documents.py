@@ -6,6 +6,7 @@ from sqlalchemy import select, delete as sql_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.responses import StreamingResponse
 from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+from workers.tasks import process_document, run_document_processing
 
 from app.api.deps import get_workspace_membership, get_current_user, require_workspace_role
 from app.db.session import get_db, SessionLocal
@@ -19,7 +20,9 @@ from app.services.document_processor import extract_text, index_document
 from app.services.qdrant_client import qdrant_client, COLLECTION_NAME
 from fastapi import Request
 from app.services.audit import log_event
+import logging
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 BUCKET_NAME = "ddocdesk-docs"
@@ -111,13 +114,24 @@ async def upload_document(
         user_id=current_user.id,
         resource_type="document",
         resource_id=document.id,
-        metadata={"file_name": document.file_name, "size_bytes": size_bytes},
+        event_metadata={"file_name": document.file_name, "size_bytes": size_bytes},
         request=request,
     )
     await db.commit()
 
-    background_tasks.add_task(process_document_task, document.id)
+    # Was: background_tasks.add_task(process_document_task, document.id)
+
+    try:
+        # Preferred path: durable, retryable, survives API restarts
+        process_document.delay(str(document.id))
+    except Exception as exc:
+        # Worker/Redis unreachable — degrade gracefully instead of
+        # leaving the document stuck in PENDING forever.
+        logger.warning("Celery unavailable, falling back to BackgroundTasks: %s", exc)
+        background_tasks.add_task(run_document_processing, str(document.id))
+
     return document
+
 
 @router.get("/{workspace_id}/documents", response_model=list[DocumentRead])
 async def list_documents(
@@ -164,7 +178,7 @@ async def download_document(
         user_id=membership.user_id,
         resource_type="document",
         resource_id=document_id,
-        metadata={"file_name": doc.file_name},
+        event_metadata={"file_name": doc.file_name},
         request=request,
     )
     await db.commit()
@@ -200,7 +214,7 @@ async def delete_document(
         user_id=current_user.id,
         resource_type="document",
         resource_id=document_id,
-        metadata={"file_name": doc.file_name},
+        event_metadata={"file_name": doc.file_name},
         request=request,
     )
 

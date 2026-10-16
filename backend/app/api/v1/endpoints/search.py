@@ -124,7 +124,7 @@ async def search_documents(
         db, "search.performed",
         workspace_id=workspace.id,
         user_id=membership.user_id,
-        metadata={"query": query.query[:200], "results": len(final_results)},
+        event_metadata={"query": query.query[:200], "results": len(final_results)},
         request=request,
     )
     await db.commit()

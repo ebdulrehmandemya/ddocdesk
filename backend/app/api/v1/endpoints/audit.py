@@ -75,7 +75,7 @@ async def list_audit_logs(
             workspace_id=log.workspace_id,
             resource_type=log.resource_type,
             resource_id=log.resource_id,
-            metadata=log.metadata,
+            metadata=log.event_metadata,
             ip_address=log.ip_address,
             created_at=log.created_at,
         )

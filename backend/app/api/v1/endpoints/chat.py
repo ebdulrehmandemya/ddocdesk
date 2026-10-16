@@ -176,7 +176,7 @@ async def chat_with_documents(
         user_id=current_user.id,
         resource_type="conversation",
         resource_id=conv.id,
-        metadata={"query": payload.query[:200], "docs_scoped": bool(payload.document_ids)},
+        event_metadata={"query": payload.query[:200], "docs_scoped": bool(payload.document_ids)},
         request=request,
     )
     await db.commit()

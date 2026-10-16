@@ -149,7 +149,7 @@ async def create_invitation(
         user_id=current_user.id,
         resource_type="invitation",
         resource_id=invitation.id,
-        metadata={"email": invitation.email, "role": invitation.role},
+        event_metadata={"email": invitation.email, "role": invitation.role},
         request=request,
     )
     await db.commit()
@@ -222,7 +222,7 @@ async def revoke_invitation(
         user_id=membership.user_id,
         resource_type="invitation",
         resource_id=invitation_id,
-        metadata={"email": inv.email},
+        event_metadata={"email": inv.email},
         request=request,
     )
     await db.commit()
@@ -321,7 +321,7 @@ async def accept_invitation(
         user_id=current_user.id,
         resource_type="invitation",
         resource_id=inv.id,
-        metadata={"email": inv.email, "role": inv.role},
+        event_metadata={"email": inv.email, "role": inv.role},
         request=request,
     )
     await db.commit()

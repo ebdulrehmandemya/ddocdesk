@@ -91,8 +91,23 @@ services:
         - "8025:8025"   # Web UI
       restart: unless-stopped
 
+  redis:
+    image: redis:latest
+    container_name: ddocdesk-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 volumes:
   postgres_data:
   minio_data:
   qdrant_data:
   # ollama_data:
+  redis_data:

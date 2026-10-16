@@ -31,7 +31,9 @@ class AuditLog(Base):
     resource_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Free-form context: file names, sizes, search query, etc.
-    metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    event_metadata: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, nullable=True
+    )
 
     ip_address: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

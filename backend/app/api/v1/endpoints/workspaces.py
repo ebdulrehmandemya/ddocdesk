@@ -78,7 +78,7 @@ async def create_workspace(
         user_id=current_user.id,
         resource_type="workspace",
         resource_id=workspace.id,
-        metadata={"name": workspace.name},
+        event_metadata={"name": workspace.name},
         request=request,
     )
     await db.commit()
@@ -177,7 +177,7 @@ async def add_member(
         user_id=membership.user_id,
         resource_type="user",
         resource_id=target_user.id,
-        metadata={"email": target_user.email, "role": new_membership.role},
+        event_metadata={"email": target_user.email, "role": new_membership.role},
         request=request,
     )
     await db.commit()
@@ -289,7 +289,7 @@ async def update_member_role(
         user_id=membership.user_id,
         resource_type="user",
         resource_id=user_id,
-        metadata={"new_role": payload.role},
+        event_metadata={"new_role": payload.role},
         request=request,
     )
     await db.commit()
@@ -419,7 +419,7 @@ async def delete_workspace(
         user_id=membership.user_id,
         resource_type="workspace",
         resource_id=workspace.id,
-        metadata={"name": workspace.name},
+        event_metadata={"name": workspace.name},
         request=request,
     )
 

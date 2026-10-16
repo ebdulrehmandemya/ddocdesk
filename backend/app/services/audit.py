@@ -38,7 +38,7 @@ async def log_event(
     user_id: UUID | None = None,
     resource_type: str | None = None,
     resource_id: UUID | str | None = None,
-    metadata: dict | None = None,
+    event_metadata: dict | None = None,
     request: Request | None = None,
 ) -> None:
     """
@@ -54,7 +54,7 @@ async def log_event(
         user_id=user_id,
         resource_type=resource_type,
         resource_id=str(resource_id) if resource_id is not None else None,
-        metadata=metadata,
+        event_metadata=event_metadata,
         ip_address=get_client_ip(request),
     )
     db.add(entry)

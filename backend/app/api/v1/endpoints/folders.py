@@ -122,7 +122,7 @@ async def move_document(
         user_id=membership.user_id,
         resource_type="document",
         resource_id=doc.id,
-        metadata={"to_folder_id": str(doc.folder_id) if doc.folder_id else None},
+        event_metadata={"to_folder_id": str(doc.folder_id) if doc.folder_id else None},
         request=request,
     )
     await db.commit()
