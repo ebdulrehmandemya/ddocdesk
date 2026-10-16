@@ -1,21 +1,23 @@
 import asyncio
 import logging
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from celery.exceptions import SoftTimeLimitExceeded
+from sqlalchemy import select
 
 from workers.celery_app import celery_app
 from workers.db import create_worker_engine, worker_session
 from app.models.document import Document, DocumentStatus
 from app.services.minio_client import s3_client
 from app.services.document_processor import extract_text, index_document
+from app.services.llm import generate_summary  # <-- NEW IMPORT
 
 logger = logging.getLogger(__name__)
-
 BUCKET_NAME = "ddocdesk-docs"
 
 
-async def _set_status(document_id: uuid.UUID, status: DocumentStatus, error: str | None = None):
+async def _set_status(document_id: uuid.UUID, status: DocumentStatus):
     engine = create_worker_engine()
     try:
         async with worker_session(engine)() as db:
@@ -28,10 +30,6 @@ async def _set_status(document_id: uuid.UUID, status: DocumentStatus, error: str
 
 
 async def run_document_processing(document_id: str) -> dict:
-    """
-    Core processing pipeline. Async and Celery-agnostic so the API can
-    reuse it as a fallback when the worker is unreachable.
-    """
     doc_uuid = uuid.UUID(document_id)
     engine = create_worker_engine()
 
@@ -39,7 +37,6 @@ async def run_document_processing(document_id: str) -> dict:
         async with worker_session(engine)() as db:
             document = await db.get(Document, doc_uuid)
             if not document:
-                logger.warning("Document %s vanished before processing", document_id)
                 return {"document_id": document_id, "status": "missing"}
 
             document.status = DocumentStatus.PROCESSING
@@ -47,33 +44,33 @@ async def run_document_processing(document_id: str) -> dict:
 
             try:
                 response = await asyncio.to_thread(
-                    s3_client.get_object,
-                    Bucket=BUCKET_NAME,
-                    Key=document.minio_key,
+                    s3_client.get_object, Bucket=BUCKET_NAME, Key=document.minio_key
                 )
                 file_bytes = response["Body"].read()
+                text = await asyncio.to_thread(extract_text, file_bytes, document.mime_type)
 
-                text = await asyncio.to_thread(
-                    extract_text, file_bytes, document.mime_type
-                )
+                # NEW: Generate AI Summary
+                summary = None
+                if text and len(text.strip()) > 50:
+                    try:
+                        summary = await generate_summary(text)
+                    except Exception as e:
+                        logger.warning("Failed to generate summary for %s: %s", document_id, e)
 
                 await index_document(document.id, document.workspace_id, text, db)
 
                 document.extracted_text = text
+                document.summary = summary
                 document.status = DocumentStatus.READY
                 await db.commit()
 
-                logger.info(
-                    "Processed %s (%s chars)", document_id, len(text or "")
-                )
-                return {"document_id": document_id, "status": "ready", "chars": len(text or "")}
+                return {"document_id": document_id, "status": "ready"}
 
-            except Exception as exc:
-                logger.exception("Extraction failed for %s", document_id)
+            except Exception:
+                logger.exception("Processing failed for %s", document_id)
                 document.status = DocumentStatus.FAILED
                 await db.commit()
                 raise
-
     finally:
         await engine.dispose()
 
@@ -87,25 +84,46 @@ async def run_document_processing(document_id: str) -> dict:
 def process_document(self, document_id: str):
     try:
         return asyncio.run(run_document_processing(document_id))
-
     except SoftTimeLimitExceeded:
-        logger.error("Document %s exceeded soft time limit", document_id)
         asyncio.run(_set_status(uuid.UUID(document_id), DocumentStatus.FAILED))
         raise
-
     except Exception as exc:
         if self.request.retries >= self.max_retries:
-            logger.error(
-                "Document %s failed permanently after %d retries",
-                document_id, self.request.retries,
-            )
             asyncio.run(_set_status(uuid.UUID(document_id), DocumentStatus.FAILED))
             raise
-
-        # Exponential backoff: 30s, 60s, 120s
         countdown = self.default_retry_delay * (2 ** self.request.retries)
-        logger.warning(
-            "Document %s failed, retrying in %ss (attempt %d/%d)",
-            document_id, countdown, self.request.retries + 1, self.max_retries + 1,
-        )
         raise self.retry(exc=exc, countdown=countdown)
+
+
+# ============================================================================
+# NEW: The Stuck-Document Reaper
+# ============================================================================
+
+@celery_app.task(name="workers.reap_stuck_documents")
+def reap_stuck_documents():
+    """Find documents stuck in PROCESSING for > 30 minutes and requeue them."""
+    async def _reap():
+        engine = create_worker_engine()
+        try:
+            async with worker_session(engine)() as db:
+                threshold = datetime.now(timezone.utc) - timedelta(minutes=30)
+                stmt = select(Document).where(
+                    Document.status == DocumentStatus.PROCESSING,
+                    Document.updated_at < threshold
+                )
+                result = await db.execute(stmt)
+                stuck_docs = result.scalars().all()
+                
+                count = 0
+                for doc in stuck_docs:
+                    logger.warning("Reaping stuck document %s (stuck since %s)", doc.id, doc.updated_at)
+                    process_document.apply_async(args=[str(doc.id)])
+                    count += 1
+                    
+                if count > 0:
+                    logger.info("Requeued %d stuck documents", count)
+                return count
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_reap())

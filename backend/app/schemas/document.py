@@ -11,4 +11,6 @@ class DocumentRead(BaseModel):
     mime_type: str
     size_bytes: int
     status: DocumentStatus
+    summary: str | None = None
     created_at: datetime
+    updated_at: datetime

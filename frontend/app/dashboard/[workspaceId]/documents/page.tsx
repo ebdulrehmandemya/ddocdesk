@@ -6,9 +6,11 @@ import DocumentViewer from "@/components/document-viewer";
 interface Doc {
   id: string;
   file_name: string;
-  mime_type: string; // Required for the previewer
+  mime_type: string;
   status: string;
+  summary: string | null;
   created_at: string;
+  updated_at: string;
   folder_id: string | null;
 }
 
@@ -268,9 +270,18 @@ export default function DocumentsPage({ params }: PageProps) {
             <tbody>
               {docs.map(d => (
                 <tr key={d.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition group">
-                  <td className="p-4 font-medium text-slate-900 dark:text-white flex items-center gap-3">
-                    <FileIcon fileName={d.file_name} />
-                    {d.file_name}
+                  <td className="p-4 font-medium text-slate-900 dark:text-white">
+                    <div className="flex items-center gap-3">
+                      <FileIcon fileName={d.file_name} />
+                      <div className="min-w-0">
+                        <div className="truncate">{d.file_name}</div>
+                        {d.summary && d.status === "ready" && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-1 max-w-md" title={d.summary}>
+                            {d.summary}
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   </td>
                   <td className="p-4">
                     <span className={`px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${statusColors[d.status] || "bg-slate-100"}`}>
