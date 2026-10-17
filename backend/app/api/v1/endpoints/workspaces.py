@@ -1,14 +1,19 @@
 from uuid import UUID
-
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func, select, delete
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Request
+from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.models.document import Document 
+
+from app.api.deps import get_current_user, get_workspace_membership, require_workspace_role
+from app.db.session import get_db
+from app.models.user import User
+from app.models.workspace import Membership, Workspace
+from app.models.document import Document, DocumentChunk
+from app.models.document_version import DocumentVersion
 from app.models.chat import Conversation, Message
 from app.models.invitation import Invitation
-from fastapi import Request
+from app.models.folder import Folder
+from app.models.audit_log import AuditLog
 from app.services.audit import log_event
-
 
 from app.api.deps import (
     get_current_user,
@@ -58,7 +63,10 @@ async def create_workspace(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    workspace = Workspace(name=payload.name)
+    workspace = Workspace(
+        name=payload.name,
+        storage_quota=104857600,  # 100 MB default for free plan
+    )    
     db.add(workspace)
     await db.flush()
 
@@ -412,7 +420,8 @@ async def delete_workspace(
     
     # Only owners can delete workspaces
     require_workspace_role(membership, {"owner"})
-
+    
+    # 1. Log the deletion
     await log_event(
         db, "workspace.deleted",
         workspace_id=workspace.id,
@@ -423,26 +432,40 @@ async def delete_workspace(
         request=request,
     )
 
-    # 1. Cleanup related data to avoid foreign key constraint errors
-    # (For MVP, we clean the DB. MinIO/Qdrant cleanup would be a background task in production)
+    # 2. Cleanup related data to avoid foreign key constraint errors
     
-    # Delete Messages (linked to Conversations)
+    # Get document IDs for this workspace to clean up chunks and versions
+    doc_ids = select(Document.id).where(Document.workspace_id == workspace.id)
+    
+    # Delete document chunks (depends on documents)
+    await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id.in_(doc_ids)))
+    
+    # Delete document versions (depends on documents)
+    await db.execute(delete(DocumentVersion).where(DocumentVersion.document_id.in_(doc_ids)))
+    
+    # Delete messages (depends on conversations)
     conv_ids = select(Conversation.id).where(Conversation.workspace_id == workspace.id)
     await db.execute(delete(Message).where(Message.conversation_id.in_(conv_ids)))
     
-    # Delete Conversations
+    # Delete conversations (depends on workspaces)
     await db.execute(delete(Conversation).where(Conversation.workspace_id == workspace.id))
     
-    # Delete Documents
+    # Delete invitations (depends on workspaces)
+    await db.execute(delete(Invitation).where(Invitation.workspace_id == workspace.id))
+    
+    # Delete documents (depends on workspaces, users, folders)
     await db.execute(delete(Document).where(Document.workspace_id == workspace.id))
     
-    # Delete Memberships
+    # Delete folders (depends on workspaces)
+    await db.execute(delete(Folder).where(Folder.workspace_id == workspace.id))
+    
+    # Delete memberships (depends on workspaces)
     await db.execute(delete(Membership).where(Membership.workspace_id == workspace.id))
-
-    # cleanup Invitation:
-    await db.execute(delete(Invitation).where(Invitation.workspace_id == workspace.id))
-
-    # 2. Delete Workspace
+    
+    # Delete audit logs for this workspace to prevent orphaned records
+    await db.execute(delete(AuditLog).where(AuditLog.workspace_id == workspace.id))
+    
+    # 3. Delete the Workspace itself
     await db.delete(workspace)
     await db.commit()
     

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { use } from "react";
-
+import StorageUsage from "@/components/storage-usage";
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -41,6 +41,7 @@ export default function WorkspaceLayout({ children, params }:  LayoutProps) {
             <span>{l.icon}</span> {l.label}
           </Link>
         ))}
+        <StorageUsage workspaceId={workspaceId} />
       </aside>
       <main className="flex-1 p-8 overflow-auto bg-slate-50 dark:bg-slate-950">
         {children}

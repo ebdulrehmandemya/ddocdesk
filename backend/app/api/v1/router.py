@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from app.api.v1.endpoints import (
-    health, me, workspaces, documents, search, chat, folders, invitations, audit
+    health, me, workspaces, documents, search, chat, 
+    folders, invitations, audit, storage
 )
 
 api_router = APIRouter()
@@ -14,3 +15,4 @@ api_router.include_router(search.router, prefix="/workspaces", tags=["Search"])
 api_router.include_router(chat.router, prefix="/workspaces", tags=["Chat"])
 api_router.include_router(invitations.router, tags=["Invitations"])
 api_router.include_router(audit.router, tags=["Audit"])
+api_router.include_router(storage.router, prefix="/workspaces", tags=["Storage"])

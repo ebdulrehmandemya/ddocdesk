@@ -6,11 +6,13 @@ from app.models.chat import Conversation, Message
 from app.models.folder import Folder
 from app.models.invitation import Invitation, InvitationStatus
 from app.models.audit_log import AuditLog
+from app.models.document_version import DocumentVersion
+
 
 __all__ = [
     "Base", "User", "Workspace", "Membership",
     "Document", "DocumentStatus", "DocumentChunk",
     "Conversation", "Message", "Folder",
     "Invitation", "InvitationStatus",
-    "AuditLog",
+    "AuditLog", "DocumentVersion"
 ]

@@ -24,6 +24,8 @@ export default function DocumentViewer({
   // Initialize loading to true only if we need to fetch text (i.e., not a PDF)
   const [loading, setLoading] = useState(!isPdf);
   const [error, setError] = useState<string | null>(null);
+  const [versions, setVersions] = useState<any[]>([]);
+  const [showVersions, setShowVersions] = useState(false);
 
   // Close on Escape key
   useEffect(() => {
@@ -33,6 +35,14 @@ export default function DocumentViewer({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  useEffect(() => {
+  fetch(`/api/backend/workspaces/${workspaceId}/documents/${documentId}/versions`)
+    .then(res => res.ok ? res.json() : [])
+    .then(setVersions)
+    .catch(() => setVersions([]));
+  }, [workspaceId, documentId]);
+
 
   // Fetch text content if not a PDF
   useEffect(() => {
@@ -112,6 +122,22 @@ export default function DocumentViewer({
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
+            {versions.length > 0 && (
+              <button
+                onClick={() => setShowVersions(!showVersions)}
+                className={`p-2 rounded-lg transition ${
+                  showVersions
+                    ? "text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400"
+                    : "text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-700"
+                }`}
+                title="Version history"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <polyline points="12 6 12 12 16 14" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 
@@ -145,6 +171,33 @@ export default function DocumentViewer({
               <pre className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-w-4xl mx-auto">
                 {textContent}
               </pre>
+            </div>
+          )}
+          {showVersions && versions.length > 0 && (
+            <div className="border-t border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-800/50 max-h-40 overflow-y-auto">
+              <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-2">Version History</h3>
+              {versions.map(v => (
+                <div key={v.id} className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50">
+                  <div className="text-sm">
+                    <span className="font-medium text-slate-700 dark:text-slate-300">v{v.version_number}</span>
+                    <span className="text-slate-400 dark:text-slate-500 ml-2 text-xs">
+                      {new Date(v.uploaded_at).toLocaleDateString()}
+                    </span>
+                    <span className="text-slate-400 dark:text-slate-500 ml-2 text-xs">
+                      {(v.size_bytes / 1024).toFixed(0)} KB
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => apiDownload(
+                      `/workspaces/${workspaceId}/documents/${documentId}/versions/${v.id}/download`,
+                      v.file_name
+                    )}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Download
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>

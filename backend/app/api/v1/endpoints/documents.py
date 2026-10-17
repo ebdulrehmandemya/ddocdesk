@@ -15,12 +15,17 @@ from app.models.workspace import Membership, Workspace
 from app.models.document import Document, DocumentStatus, DocumentChunk
 from app.models.folder import Folder
 from app.schemas.document import DocumentRead
+from app.models.document_version import DocumentVersion
+from app.schemas.document import DocumentVersionRead
 from app.services.minio_client import s3_client
 from app.services.document_processor import extract_text, index_document
 from app.services.qdrant_client import qdrant_client, COLLECTION_NAME
 from fastapi import Request
 from app.services.audit import log_event
 import logging
+from app.services.storage import check_quota
+from fastapi import HTTPException, status
+
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +91,21 @@ async def upload_document(
 
     contents = await file.read()
     size_bytes = len(contents)
+
+    # Check storage quota
+    is_within, current_usage, quota = await check_quota(
+        db, workspace.id, size_bytes, workspace.storage_quota or 0
+    )
+    if not is_within:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"Storage quota exceeded. "
+                f"Current usage: {current_usage / 1024 / 1024:.1f} MB, "
+                f"Quota: {quota / 1024 / 1024:.1f} MB, "
+                f"Attempted upload: {size_bytes / 1024 / 1024:.1f} MB"
+            ),
+        )
     
     folder_path = str(folder_id) if folder_id else "root"
     minio_key = f"{workspace_id}/{folder_path}/{uuid.uuid4()}/{file.filename}"
@@ -317,3 +337,159 @@ async def preview_document(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="Preview not supported for this file type"
         )
+
+
+@router.post(
+    "/{workspace_id}/documents/{document_id}/versions",
+    response_model=DocumentRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_new_version(
+    workspace_id: uuid.UUID,
+    document_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    file: UploadFile = File(...),
+    workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    workspace, membership = workspace_membership
+    require_workspace_role(membership, {"owner", "admin", "member"})
+
+    # Fetch the existing document
+    stmt = select(Document).where(
+        Document.id == document_id,
+        Document.workspace_id == workspace.id,
+    )
+    doc = (await db.execute(stmt)).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Read the new file
+    contents = await file.read()
+    size_bytes = len(contents)
+
+    # Check quota
+    is_within, current_usage, quota = await check_quota(
+        db, workspace.id, size_bytes, workspace.storage_quota or 0
+    )
+    if not is_within:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Storage quota exceeded. Current: {current_usage / 1024 / 1024:.1f} MB, Quota: {quota / 1024 / 1024:.1f} MB",
+        )
+
+    # Archive the current version
+    current_version = DocumentVersion(
+        document_id=doc.id,
+        version_number=doc.version,
+        file_name=doc.file_name,
+        mime_type=doc.mime_type,
+        minio_key=doc.minio_key,
+        size_bytes=doc.size_bytes,
+        uploaded_by_id=doc.uploaded_by_id,
+    )
+    db.add(current_version)
+
+    # Upload new file to MinIO
+    minio_key = f"{workspace_id}/versions/{uuid.uuid4()}/{file.filename}"
+    await asyncio.to_thread(
+        s3_client.put_object,
+        Bucket=BUCKET_NAME,
+        Key=minio_key,
+        Body=contents,
+        ContentType=file.content_type,
+    )
+
+    # Update the document record
+    doc.file_name = file.filename
+    doc.mime_type = file.content_type
+    doc.size_bytes = size_bytes
+    doc.minio_key = minio_key
+    doc.version += 1
+    doc.status = DocumentStatus.PENDING
+    doc.extracted_text = None
+    doc.summary = None
+    doc.uploaded_by_id = current_user.id
+
+    await db.commit()
+    await db.refresh(doc)
+
+    # Trigger processing for the new version
+    try:
+        from workers.tasks import process_document
+        process_document.delay(str(doc.id))
+    except Exception:
+        background_tasks.add_task(run_document_processing, str(doc.id))
+
+    return doc
+
+
+@router.get(
+    "/{workspace_id}/documents/{document_id}/versions",
+    response_model=list[DocumentVersionRead],
+)
+async def list_versions(
+    workspace_id: uuid.UUID,
+    document_id: uuid.UUID,
+    workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
+    db: AsyncSession = Depends(get_db),
+):
+    workspace, _ = workspace_membership
+
+    # Verify document exists in this workspace
+    doc = (
+        await db.execute(
+            select(Document).where(
+                Document.id == document_id,
+                Document.workspace_id == workspace.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    result = await db.execute(
+        select(DocumentVersion)
+        .where(DocumentVersion.document_id == document_id)
+        .order_by(DocumentVersion.version_number.desc())
+    )
+    return result.scalars().all()
+
+
+@router.get(
+    "/{workspace_id}/documents/{document_id}/versions/{version_id}/download",
+)
+async def download_version(
+    workspace_id: uuid.UUID,
+    document_id: uuid.UUID,
+    version_id: uuid.UUID,
+    workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
+    db: AsyncSession = Depends(get_db),
+):
+    workspace, _ = workspace_membership
+
+    version = (
+        await db.execute(
+            select(DocumentVersion).where(
+                DocumentVersion.id == version_id,
+                DocumentVersion.document_id == document_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    def get_file():
+        response = s3_client.get_object(Bucket=BUCKET_NAME, Key=version.minio_key)
+        return response["Body"].read()
+
+    file_bytes = await asyncio.to_thread(get_file)
+
+    return StreamingResponse(
+        io.BytesIO(file_bytes),
+        media_type=version.mime_type,
+        headers={"Content-Disposition": f'attachment; filename="{version.file_name}"'},
+    )
