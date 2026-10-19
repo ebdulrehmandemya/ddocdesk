@@ -1,0 +1,17 @@
+docker exec -i ddocdesk-postgres psql -U ddocdesk -d ddocdesk << 'EOF'
+
+-- 1. Add missing columns if they don't exist
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS version INTEGER;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;
+
+-- 2. Backfill NULL values for existing rows
+UPDATE documents SET version = 1 WHERE version IS NULL;
+UPDATE documents SET updated_at = created_at WHERE updated_at IS NULL;
+
+-- 3. Enforce NOT NULL constraints now that data is clean
+ALTER TABLE documents ALTER COLUMN version SET DEFAULT 1;
+ALTER TABLE documents ALTER COLUMN version SET NOT NULL;
+ALTER TABLE documents ALTER COLUMN updated_at SET NOT NULL;
+
+EOF

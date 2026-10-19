@@ -7,6 +7,7 @@ from app.models.folder import Folder
 from app.models.invitation import Invitation, InvitationStatus
 from app.models.audit_log import AuditLog
 from app.models.document_version import DocumentVersion
+from app.models.share_link import ShareLink, ShareTargetType
 
 
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     "Document", "DocumentStatus", "DocumentChunk",
     "Conversation", "Message", "Folder",
     "Invitation", "InvitationStatus",
-    "AuditLog", "DocumentVersion"
+    "AuditLog", "DocumentVersion",
+    "ShareLink", "ShareTargetType",
 ]
