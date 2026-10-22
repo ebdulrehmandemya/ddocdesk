@@ -19,15 +19,20 @@ export default function DocumentViewer({
 }: DocumentViewerProps) {
   const previewUrl = `/api/backend/workspaces/${workspaceId}/documents/${documentId}/preview`;
   const isPdf = mimeType === "application/pdf";
+  const isAudio = mimeType?.startsWith("audio/") || 
+    fileName.endsWith(".mp3") || 
+    fileName.endsWith(".wav") || 
+    fileName.endsWith(".m4a") ||
+    fileName.endsWith(".ogg") ||
+    fileName.endsWith(".flac");
+  const isVideo = mimeType?.startsWith("video/") || 
+    fileName.endsWith(".mp4") || 
+    fileName.endsWith(".webm");
 
   const [textContent, setTextContent] = useState<string | null>(null);
-  // Initialize loading to true only if we need to fetch text (i.e., not a PDF)
-  const [loading, setLoading] = useState(!isPdf);
+  const [loading, setLoading] = useState(!isPdf && !isAudio && !isVideo);
   const [error, setError] = useState<string | null>(null);
-  const [versions, setVersions] = useState<any[]>([]);
-  const [showVersions, setShowVersions] = useState(false);
 
-  // Close on Escape key
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -37,18 +42,7 @@ export default function DocumentViewer({
   }, [onClose]);
 
   useEffect(() => {
-  fetch(`/api/backend/workspaces/${workspaceId}/documents/${documentId}/versions`)
-    .then(res => res.ok ? res.json() : [])
-    .then(setVersions)
-    .catch(() => setVersions([]));
-  }, [workspaceId, documentId]);
-
-
-  // Fetch text content if not a PDF
-  useEffect(() => {
-    // If it's a PDF, we do nothing synchronously. 
-    // `loading` is already `false` from initialization.
-    if (isPdf) return; 
+    if (isPdf || isAudio || isVideo) return;
 
     let isActive = true;
     
@@ -60,23 +54,48 @@ export default function DocumentViewer({
       .then(text => {
         if (isActive) {
           setTextContent(text);
-          setLoading(false); // Allowed: inside an async callback
+          setLoading(false);
         }
       })
       .catch(err => {
         if (isActive) {
           setError(err.message);
-          setLoading(false); // Allowed: inside an async callback
+          setLoading(false);
         }
       });
 
     return () => {
       isActive = false;
     };
-  }, [previewUrl, isPdf]);
+  }, [previewUrl, isPdf, isAudio, isVideo]);
 
-  const fileIcon = isPdf ? "📕" : mimeType.includes("wordprocessing") ? "📘" : "📄";
-  const fileTypeLabel = isPdf ? "PDF" : mimeType.includes("wordprocessing") ? "Word Document" : "Text File";
+  // Fetch transcription for audio files
+  useEffect(() => {
+    if (!isAudio) return;
+
+    let isActive = true;
+    
+    fetch(previewUrl)
+      .then(res => {
+        if (!res.ok) throw new Error(`Failed to load transcription (${res.status})`);
+        return res.text();
+      })
+      .then(text => {
+        if (isActive && text && text.length > 0) {
+          setTextContent(text);
+        }
+      })
+      .catch(() => {
+        // Transcription might not be available yet
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [previewUrl, isAudio]);
+
+  const fileIcon = isPdf ? "📕" : isAudio ? "🎙️" : isVideo ? "🎬" : mimeType?.includes("wordprocessing") ? "📘" : "📄";
+  const fileTypeLabel = isPdf ? "PDF" : isAudio ? "Audio File" : isVideo ? "Video File" : mimeType?.includes("wordprocessing") ? "Word Document" : "Text File";
 
   return (
     <div 
@@ -122,22 +141,6 @@ export default function DocumentViewer({
                 <line x1="6" y1="6" x2="18" y2="18" />
               </svg>
             </button>
-            {versions.length > 0 && (
-              <button
-                onClick={() => setShowVersions(!showVersions)}
-                className={`p-2 rounded-lg transition ${
-                  showVersions
-                    ? "text-blue-600 bg-blue-50 dark:bg-blue-900/20 dark:text-blue-400"
-                    : "text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-700"
-                }`}
-                title="Version history"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <polyline points="12 6 12 12 16 14" />
-                </svg>
-              </button>
-            )}
           </div>
         </div>
 
@@ -149,6 +152,32 @@ export default function DocumentViewer({
               className="w-full h-full border-0"
               title={fileName}
             />
+          ) : isAudio ? (
+            <div className="flex flex-col items-center justify-center h-full gap-6 p-8 overflow-auto">
+              <div className="text-6xl">🎙️</div>
+              <p className="text-lg font-medium text-slate-700 dark:text-slate-300 text-center">{fileName}</p>
+              <audio controls className="w-full max-w-md" src={previewUrl}>
+                Your browser does not support the audio element.
+              </audio>
+              {textContent && (
+                <div className="w-full max-w-2xl mt-6">
+                  <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase mb-3">Transcription</h3>
+                  <div className="max-h-64 overflow-y-auto p-4 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700">
+                    <pre className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed">
+                      {textContent}
+                    </pre>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : isVideo ? (
+            <div className="flex flex-col items-center justify-center h-full gap-6 p-8">
+              <div className="text-6xl">🎬</div>
+              <p className="text-lg font-medium text-slate-700 dark:text-slate-300 text-center">{fileName}</p>
+              <video controls className="w-full max-w-2xl rounded-xl" src={previewUrl}>
+                Your browser does not support the video element.
+              </video>
+            </div>
           ) : loading ? (
             <div className="flex items-center justify-center h-full">
               <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400">
@@ -171,33 +200,6 @@ export default function DocumentViewer({
               <pre className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap font-mono leading-relaxed max-w-4xl mx-auto">
                 {textContent}
               </pre>
-            </div>
-          )}
-          {showVersions && versions.length > 0 && (
-            <div className="border-t border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-800/50 max-h-40 overflow-y-auto">
-              <h3 className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase mb-2">Version History</h3>
-              {versions.map(v => (
-                <div key={v.id} className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700/50">
-                  <div className="text-sm">
-                    <span className="font-medium text-slate-700 dark:text-slate-300">v{v.version_number}</span>
-                    <span className="text-slate-400 dark:text-slate-500 ml-2 text-xs">
-                      {new Date(v.uploaded_at).toLocaleDateString()}
-                    </span>
-                    <span className="text-slate-400 dark:text-slate-500 ml-2 text-xs">
-                      {(v.size_bytes / 1024).toFixed(0)} KB
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => apiDownload(
-                      `/workspaces/${workspaceId}/documents/${documentId}/versions/${v.id}/download`,
-                      v.file_name
-                    )}
-                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    Download
-                  </button>
-                </div>
-              ))}
             </div>
           )}
         </div>

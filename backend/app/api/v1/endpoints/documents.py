@@ -31,7 +31,11 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 BUCKET_NAME = "ddocdesk-docs"
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".txt"}
+ALLOWED_EXTENSIONS = {
+    ".pdf", ".docx", ".txt",
+    ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".webm",
+    ".mp4", 
+}
 
 async def process_document_task(document_id: uuid.UUID):
     """Background task to download from MinIO, extract text, and update DB."""
@@ -493,3 +497,104 @@ async def download_version(
         media_type=version.mime_type,
         headers={"Content-Disposition": f'attachment; filename="{version.file_name}"'},
     )
+
+
+@router.get("/{workspace_id}/documents/{document_id}/preview")
+async def preview_document(
+    workspace_id: uuid.UUID,
+    document_id: uuid.UUID,
+    workspace_membership: tuple[Workspace, Membership] = Depends(get_workspace_membership),
+    db: AsyncSession = Depends(get_db),
+):
+    workspace, _ = workspace_membership
+    
+    stmt = select(Document).where(
+        Document.id == document_id, 
+        Document.workspace_id == workspace.id
+    )
+    result = await db.execute(stmt)
+    doc = result.scalar_one_or_none()
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    
+    if doc.status != DocumentStatus.READY:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, 
+            detail="Document is still processing"
+        )
+    
+    # PDF: stream the original file for native browser rendering
+    if doc.mime_type == "application/pdf":
+        def get_file():
+            response = s3_client.get_object(Bucket=BUCKET_NAME, Key=doc.minio_key)
+            return response['Body'].read()
+        
+        file_bytes = await asyncio.to_thread(get_file)
+        
+        return StreamingResponse(
+            io.BytesIO(file_bytes),
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="{doc.file_name}"',
+                "Cache-Control": "private, max-age=3600",
+            }
+        )
+    
+    # NEW: Audio and Video files - stream directly for browser playback
+    elif doc.mime_type.startswith("audio/") or doc.mime_type.startswith("video/"):
+        def get_file():
+            response = s3_client.get_object(Bucket=BUCKET_NAME, Key=doc.minio_key)
+            return response['Body'].read()
+        
+        file_bytes = await asyncio.to_thread(get_file)
+        
+        return StreamingResponse(
+            io.BytesIO(file_bytes),
+            media_type=doc.mime_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{doc.file_name}"',
+                "Cache-Control": "private, max-age=3600",
+                "Accept-Ranges": "bytes",
+            }
+        )
+    
+    # TXT: stream the original text file
+    elif doc.mime_type == "text/plain":
+        def get_file():
+            response = s3_client.get_object(Bucket=BUCKET_NAME, Key=doc.minio_key)
+            return response['Body'].read()
+        
+        file_bytes = await asyncio.to_thread(get_file)
+        
+        return StreamingResponse(
+            io.BytesIO(file_bytes),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": f'inline; filename="{doc.file_name}"',
+                "Cache-Control": "private, max-age=3600",
+            }
+        )
+    
+    # DOCX: return the extracted text
+    elif doc.mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+        if not doc.extracted_text:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document text not yet extracted"
+            )
+        
+        return StreamingResponse(
+            io.BytesIO(doc.extracted_text.encode('utf-8')),
+            media_type="text/plain; charset=utf-8",
+            headers={
+                "Content-Disposition": f'inline; filename="{doc.file_name}.txt"',
+                "Cache-Control": "private, max-age=3600",
+            }
+        )
+    
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail="Preview not supported for this file type"
+        )

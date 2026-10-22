@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from celery.exceptions import SoftTimeLimitExceeded
+from docx import document
 from sqlalchemy import select
 
 from workers.celery_app import celery_app
@@ -47,7 +48,19 @@ async def run_document_processing(document_id: str) -> dict:
                     s3_client.get_object, Bucket=BUCKET_NAME, Key=document.minio_key
                 )
                 file_bytes = response["Body"].read()
-                text = await asyncio.to_thread(extract_text, file_bytes, document.mime_type)
+                text = await asyncio.to_thread(
+                    extract_text, 
+                    file_bytes, 
+                    document.mime_type,
+                    document.file_name,  # <-- Pass the filename for extension-based detection
+                )
+
+                # Detect and save the language (for audio files)
+                if document.mime_type.startswith(("audio/", "video/")):
+                    # Extract language from the transcription metadata
+                    # This is a simplified version - you'd need to return the language from transcribe_audio
+                    pass
+
 
                 # NEW: Generate AI Summary
                 summary = None

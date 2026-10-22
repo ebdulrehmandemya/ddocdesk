@@ -14,7 +14,7 @@ from app.models.invitation import Invitation
 from app.models.folder import Folder
 from app.models.audit_log import AuditLog
 from app.services.audit import log_event
-
+from app.models.share_link import ShareLink
 from app.api.deps import (
     get_current_user,
     get_workspace_membership,
@@ -409,6 +409,7 @@ async def update_workspace(
     
     return serialize_workspace(workspace, membership.role)
 
+
 @router.delete("/{workspace_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_workspace(
     workspace_id: UUID,
@@ -417,11 +418,9 @@ async def delete_workspace(
     db: AsyncSession = Depends(get_db),
 ):
     workspace, membership = workspace_membership
-    
-    # Only owners can delete workspaces
     require_workspace_role(membership, {"owner"})
     
-    # 1. Log the deletion
+    # Log the deletion
     await log_event(
         db, "workspace.deleted",
         workspace_id=workspace.id,
@@ -432,7 +431,7 @@ async def delete_workspace(
         request=request,
     )
 
-    # 2. Cleanup related data to avoid foreign key constraint errors
+    # Cleanup related data to avoid foreign key constraint errors
     
     # Get document IDs for this workspace to clean up chunks and versions
     doc_ids = select(Document.id).where(Document.workspace_id == workspace.id)
@@ -453,6 +452,9 @@ async def delete_workspace(
     # Delete invitations (depends on workspaces)
     await db.execute(delete(Invitation).where(Invitation.workspace_id == workspace.id))
     
+    # NEW: Delete share links (depends on workspaces)
+    await db.execute(delete(ShareLink).where(ShareLink.workspace_id == workspace.id))
+    
     # Delete documents (depends on workspaces, users, folders)
     await db.execute(delete(Document).where(Document.workspace_id == workspace.id))
     
@@ -462,10 +464,10 @@ async def delete_workspace(
     # Delete memberships (depends on workspaces)
     await db.execute(delete(Membership).where(Membership.workspace_id == workspace.id))
     
-    # Delete audit logs for this workspace to prevent orphaned records
+    # Delete audit logs for this workspace
     await db.execute(delete(AuditLog).where(AuditLog.workspace_id == workspace.id))
     
-    # 3. Delete the Workspace itself
+    # Delete the Workspace itself
     await db.delete(workspace)
     await db.commit()
     

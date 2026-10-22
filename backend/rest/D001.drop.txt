@@ -15,3 +15,15 @@ ALTER TABLE documents ALTER COLUMN version SET NOT NULL;
 ALTER TABLE documents ALTER COLUMN updated_at SET NOT NULL;
 
 EOF
+
+
+
+docker exec -i ddocdesk-postgres psql -U ddocdesk -d ddocdesk << 'EOF'
+-- Drop all tables in the public schema
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+
+-- Restore default permissions
+GRANT ALL ON SCHEMA public TO ddocdesk;
+GRANT ALL ON SCHEMA public TO public;
+EOF

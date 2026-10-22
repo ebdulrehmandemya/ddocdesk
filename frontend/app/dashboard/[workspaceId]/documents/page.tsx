@@ -27,11 +27,31 @@ interface PageProps {
   params: { workspaceId: string } | Promise<{ workspaceId: string }>;
 }
 
-function FileIcon({ fileName }: { fileName: string }) {
+function FileIcon({ fileName, mimeType }: { fileName: string; mimeType?: string }) {
   if (fileName.endsWith(".pdf")) return <span className="text-xl">📕</span>;
   if (fileName.endsWith(".docx")) return <span className="text-xl">📘</span>;
+  if (fileName.endsWith(".txt")) return <span className="text-xl">📄</span>;
+  
+  // Audio files
+  if (mimeType?.startsWith("audio/") || 
+      fileName.endsWith(".mp3") || 
+      fileName.endsWith(".wav") || 
+      fileName.endsWith(".m4a") ||
+      fileName.endsWith(".ogg") ||
+      fileName.endsWith(".flac")) {
+    return <span className="text-xl">🎙️</span>;
+  }
+  
+  // Video files
+  if (mimeType?.startsWith("video/") || 
+      fileName.endsWith(".mp4") || 
+      fileName.endsWith(".webm")) {
+    return <span className="text-xl">🎬</span>;
+  }
+  
   return <span className="text-xl">📄</span>;
 }
+
 
 export default function DocumentsPage({ params }: PageProps) {
   const { workspaceId } = "then" in params ? use(params) : params;
@@ -279,7 +299,13 @@ export default function DocumentsPage({ params }: PageProps) {
           </div>
           <label className="px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 font-medium shadow-sm transition">
             {uploading ? "Uploading..." : "+ Upload"}
-            <input type="file" className="hidden" ref={fileInputRef} onChange={handleUpload} accept=".pdf,.docx,.txt" />
+            <input 
+              type="file" 
+              className="hidden" 
+              ref={fileInputRef} 
+              onChange={handleUpload} 
+              accept=".pdf,.docx,.txt,.mp3,.wav,.m4a,.ogg,.flac,.webm,.mp4" 
+            />          
           </label>
         </div>
 
@@ -299,7 +325,7 @@ export default function DocumentsPage({ params }: PageProps) {
                 <tr key={d.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/30 transition group">
                   <td className="p-4 font-medium text-slate-900 dark:text-white">
                     <div className="flex items-center gap-3">
-                      <FileIcon fileName={d.file_name} />
+                      <FileIcon fileName={d.file_name} mimeType={d.mime_type} />
                       <div className="min-w-0">
                         <div className="truncate">
                           {d.file_name}
@@ -413,7 +439,7 @@ export default function DocumentsPage({ params }: PageProps) {
                         <input
                           type="file"
                           className="hidden"
-                          accept=".pdf,.docx,.txt"
+                          accept=".pdf,.docx,.txt,.mp3,.wav,.m4a,.ogg,.flac,.webm,.mp4"
                           disabled={d.status !== "ready"}
                           onChange={(e) => handleUploadVersion(d.id, e)}
                         />
